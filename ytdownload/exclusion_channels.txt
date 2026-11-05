@@ -1,0 +1,7 @@
+# Kênh KHÔNG tải - mỗi dòng một kênh
+# Có thể dùng URL, @handle hoặc channel ID
+# Kênh nằm trong file này sẽ bị bỏ qua dù có trong channels.txt
+# Ví dụ:
+# https://www.youtube.com/@example
+# @example
+# UCxxxxxxxxxxxxxxxxxxxxxx

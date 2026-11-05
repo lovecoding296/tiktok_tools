@@ -1,0 +1,9 @@
+// Mỗi dòng một từ KHÔNG được dùng để tạo hashtag (không phân biệt hoa/thường, có hay không có dấu # đều được).
+// Dòng bắt đầu bằng // là ghi chú.
+// Các từ nối thông dụng (the, and, of, in...) và động từ/tính từ chung chung (found, new, best...) đã được
+// loại sẵn trong code; file này để bạn thêm những từ riêng của mình.
+video
+videos
+full
+official
+episode

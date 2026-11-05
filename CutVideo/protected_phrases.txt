@@ -1,0 +1,23 @@
+// Mỗi dòng là một cụm từ KHÔNG được ngắt xuống dòng (không phân biệt hoa/thường).
+// Dòng bắt đầu bằng // là ghi chú. Mỗi cụm cần từ 2 từ trở lên.
+HOW TO
+TOP 10
+TOP 5
+PART 1
+PART 2
+PART 3
+PT. 1
+PT. 2
+PT. 3
+SECRET TUNNEL
+UNDERGROUND CITY
+ABANDONED HOUSE
+HIDDEN CITY
+REAL LIFE
+NO ONE
+IN THE
+OF THE
+A SECRET
+THE SECRET
+100 FAMILIES
+217 PEOPLE

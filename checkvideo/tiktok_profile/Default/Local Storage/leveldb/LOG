@@ -1,0 +1,8 @@
+2026/10/06-21:16:14.165 1624 Reusing MANIFEST D:\tools\checkvideo\tiktok_profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/10/06-21:16:14.166 1624 Recovering log #9
+2026/10/06-21:16:14.167 1624 Level-0 table #12: started
+2026/10/06-21:16:14.185 1624 Level-0 table #12: 183611 bytes OK
+2026/10/06-21:16:14.185 1624 Recovering log #12
+2026/10/06-21:16:14.186 1624 Reusing old log D:\tools\checkvideo\tiktok_profile\Default\Local Storage\leveldb/000012.log 
+2026/10/06-21:16:14.201 1624 Delete type=0 #9
+2026/10/06-21:16:14.201 1624 Delete type=2 #13

@@ -1,0 +1,7 @@
+# Mỗi dòng một kênh
+# Có thể dùng URL, @handle hoặc channel ID
+# Copy link kênh YouTube vào clipboard -> chương trình tự thêm vào đây
+# Ví dụ:
+# https://www.youtube.com/@example
+# @example
+# UCxxxxxxxxxxxxxxxxxxxxxx

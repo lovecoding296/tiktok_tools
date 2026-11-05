@@ -1,0 +1,18 @@
+{
+  "videos_per_channel": 30,
+  "top_videos": 3,
+  "min_views": 500000,
+  "max_scan": 50,
+  "popular_scan": 60,
+  "min_minutes": 5,
+  "max_minutes": 100,
+  "max_age_days": 365,
+  "max_height": 1080,
+  "workers": 5,
+  "scan_workers": 5,
+  "output": "downloads",
+  "use_aria2c": true,
+  "watch_clipboard": true,
+  "auto_video_clipboard": false,
+  "cookies_browser": ""
+}
