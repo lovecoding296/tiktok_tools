@@ -4,6 +4,9 @@
 *.exe
 *.pyc
 
+*service_account.json
+
+
 # Build output folders
 build/
 dist/
