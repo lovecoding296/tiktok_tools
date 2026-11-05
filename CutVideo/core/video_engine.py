@@ -208,12 +208,25 @@ CANVAS_H = 1920
 TIKTOK_SAFE_TOP = 240  # vùng an toàn phía trên của TikTok (thanh tìm kiếm / tab): 240px tính từ mép trên khung 1080x1920 (theo bộ safe zone TikTok công bố cho quảng cáo In-Feed)
 
 
-def compute_title_y(title_h, top_offset=0, safe_top=None):
-    """Toạ độ y của đỉnh ô tiêu đề: nằm dưới vùng an toàn của TikTok (cách mép trên khung TIKTOK_SAFE_TOP px) cộng thêm top_offset px.
-    Không phụ thuộc vị trí video. Nếu tiêu đề quá cao thì kéo lên cho khỏi tràn khỏi đáy khung."""
-    off = max(0, int(top_offset))
-    st = TIKTOK_SAFE_TOP if safe_top is None else max(0, int(safe_top))
-    return min(st + off, max(0, CANVAS_H - int(title_h)))
+TITLE_MAX_LINES = 3      # tiêu đề tối đa 3 dòng: nếu dài hơn thì nới rộng ô (giảm lề hai bên) từng bước cho tới khi còn 3 dòng
+TITLE_MARGIN_MIN = 120   # lề hai bên nhỏ nhất khi tự nới rộng (px); lề người dùng đặt nhỏ hơn mức này thì giữ nguyên
+TITLE_MARGIN_STEP = 5    # mỗi bước giảm lề (px) - dừng ngay khi còn 3 dòng, không giảm một phát xuống mức nhỏ nhất
+
+
+def compute_title_y(title_h, video_y):
+    """Toạ độ y của đỉnh ô tiêu đề: ô tiêu đề nằm GIỮA khoảng từ vùng an toàn của TikTok (TIKTOK_SAFE_TOP = 240px
+    tính từ mép trên khung) tới mép trên của video (video_y).
+    Nếu video lấp sát đỉnh khung (video_y <= vùng an toàn) thì không còn khoảng trống: đặt đỉnh ô ngay dưới vùng an toàn.
+    Luôn giữ ô nằm trong khung."""
+    th = int(title_h)
+    vy = int(video_y)
+    if vy <= TIKTOK_SAFE_TOP:
+        y = TIKTOK_SAFE_TOP
+    else:
+        y = TIKTOK_SAFE_TOP + (vy - TIKTOK_SAFE_TOP - th) // 2
+    return max(0, min(y, CANVAS_H - th))
+
+
 # False: coi pixel là vuông, dùng đúng width x height của file (960x720 -> 4:3).
 # True : nhân thêm SAR trong metadata (chỉ nên bật cho video anamorphic thật sự).
 RESPECT_SAR = False
@@ -627,7 +640,7 @@ def wrap_title(text, measure, max_width):
     return lines or [text]
 
 
-TITLE_LAYOUT = 'o-deu-v2'  # nhãn phiên bản bố cục tiêu đề (mọi ô cao bằng nhau); main_window hiện nhãn này trên thanh xem trước
+TITLE_LAYOUT = 'o-deu-v3'  # nhãn phiên bản bố cục tiêu đề (mọi ô cao bằng nhau); main_window hiện nhãn này trên thanh xem trước
 
 
 def _opt_num(opts, key, default, lo, hi):
@@ -647,13 +660,14 @@ def render_title_image(text, opts, out_path):
       box_pad_x   đệm ngang, % cỡ chữ (mặc định 50)
       box_pad_y   đệm dọc thêm vào MỖI dòng (mọi ô cao bằng nhau = bước dòng + đệm), % cỡ chữ (mặc định 25)
       line_height khoảng cách giữa các dòng (bước dòng), % cỡ chữ, 60-300 (mặc định 125 - sát như TikTok)
-      safe_top    vùng an toàn phía trên, px (mặc định 240)
       font_weight / font_width  độ đậm (100-900) / độ rộng (50-200) của font biến thiên
       min_gap     hở dòng tối thiểu, % cỡ chữ (mặc định 12)
       merge_step  bậc nhỏ hơn (x bán kính bo) thì gộp bằng nhau (mặc định 2)
       text_dy     dịch chữ theo chiều dọc, px (mặc định 0)
       supersample độ mịn khử răng cưa 1-8 (mặc định 4)
-      margin_x    lề hai bên, px (mặc định 180 -> ô rộng tối đa 720px, gần kiểu TikTok) - quyết định độ rộng tối đa của ô
+      margin_x    lề hai bên, px (mặc định 180 -> ô rộng tối đa 720px, gần kiểu TikTok) - quyết định độ rộng tối đa của ô.
+                  Nếu tiêu đề thành hơn TITLE_MAX_LINES (3) dòng thì lề được giảm dần từng bước TITLE_MARGIN_STEP px
+                  (không thấp hơn TITLE_MARGIN_MIN = 120px) và dừng ngay khi còn 3 dòng.
     Trả về chiều cao ảnh (px)."""
     try:
         from PIL import Image, ImageDraw, ImageChops
@@ -674,8 +688,16 @@ def render_title_image(text, opts, out_path):
     pad_x = int(round(size * _opt_num(opts, 'box_pad_x', 50, 0, 500) / 100.0)) * SS
     pad_y = int(round(size * _opt_num(opts, 'box_pad_y', 25, 0, 500) / 100.0)) * SS
     tf = _TitleFont(size * SS, font_path, _opt_num(opts, 'font_weight', 700, 100, 900), _opt_num(opts, 'font_width', 100, 50, 200))
-    avail_w = (CANVAS_W - 2 * margin_x) * SS - 2 * pad_x
-    lines = wrap_title(text, tf.width, avail_w)
+
+    def _wrap_with_margin(m):
+        return wrap_title(text, tf.width, (CANVAS_W - 2 * m) * SS - 2 * pad_x)
+
+    lines = _wrap_with_margin(margin_x)
+    # Tiêu đề dài quá 3 dòng: nới ô rộng ra từng bước (giảm lề), còn 3 dòng là dừng - không nhảy thẳng xuống lề nhỏ nhất.
+    margin_floor = min(margin_x, TITLE_MARGIN_MIN)
+    while len(lines) > TITLE_MAX_LINES and margin_x > margin_floor:
+        margin_x = max(margin_floor, margin_x - TITLE_MARGIN_STEP)
+        lines = _wrap_with_margin(margin_x)
     font = tf.primary
 
     n = len(lines)
@@ -819,7 +841,8 @@ def render_title_image(text, opts, out_path):
 # ---------------------------------------------------------------------------------------------
 def render_title_preview(opts, text, resolution_preset='1920x1080'):
     """Tạo ảnh xem trước: canvas CANVAS_W x CANVAS_H nền đen + tiêu đề `text`, đặt ở đúng vị trí như khi render
-    video thật (đỉnh ô chữ nằm dưới vùng an toàn phía trên của TikTok, không phụ thuộc vị trí video).
+    video thật (nằm giữa vùng an toàn 240px và mép trên video). Video được giả lập bằng hình chữ nhật trắng
+    có kích thước/vị trí theo Resolution.
     Trả về PIL.Image RGB. Lưu ý: vị trí dựa vào mục Resolution; 'Original' coi video nguồn là 1920x1080."""
     from PIL import Image
     text = sanitize_title(text, _find_title_font())
@@ -827,7 +850,7 @@ def render_title_preview(opts, text, resolution_preset='1920x1080'):
         raise RuntimeError('Tiêu đề trống.')
     m = re.search(r'(\d{3,4})\s*x\s*(\d{3,4})', str(resolution_preset))
     tile_w, tile_h = (int(m.group(1)), int(m.group(2))) if m else (1920, 1080)
-    _, _, _, py = compute_frame_layout(tile_w, tile_h)
+    vw, vh, px, py = compute_frame_layout(tile_w, tile_h)
     fd, tmp_png = tempfile.mkstemp(suffix='.png', prefix='title_preview_')
     os.close(fd)
     try:
@@ -835,7 +858,7 @@ def render_title_preview(opts, text, resolution_preset='1920x1080'):
             title_h = render_title_image(text, dict(opts, halign='center'), tmp_png)
         else:
             title_h = render_title_image(text, opts, tmp_png)
-        title_y = compute_title_y(title_h, opts.get('top_offset', 0), opts.get('safe_top'))
+        title_y = compute_title_y(title_h, py)
         title_img = Image.open(tmp_png).convert('RGBA')
         title_img.load()
     finally:
@@ -844,6 +867,7 @@ def render_title_preview(opts, text, resolution_preset='1920x1080'):
         except OSError:
             pass
     canvas = Image.new('RGBA', (CANVAS_W, CANVAS_H), (0, 0, 0, 255))
+    canvas.paste((255, 255, 255, 255), (px, py, px + vw, py + vh))  # hình chữ nhật trắng giả lập video
     canvas.alpha_composite(title_img, (0, title_y))
     return canvas.convert('RGB')
 
@@ -884,8 +908,8 @@ def render_segment(video_path, start_time, segment_duration, output_path, speed=
     """Render a single cut segment using FFmpeg fast seeking (-ss before -i)
     with instant cancellation support.
     frame_opts: nếu có -> cắt video theo tỉ lệ của resolution_preset (vd 960x720 = 4:3), rồi đặt vào
-                khung 9:16 (1080x1920) nền đen, video ở giữa, tiêu đề nằm trong vùng đen ngay phía trên video.
-                Keys: text, size, color, halign, top_offset (px thêm dưới vùng an toàn TikTok).
+                khung 9:16 (1080x1920) nền đen, video ở giữa, tiêu đề nằm giữa vùng an toàn (240px) và mép trên video.
+                Keys: text, size, color, halign, margin_x, ...
     is_cancelled: callable trả về True khi người dùng bấm dừng.
     volume_db: chỉnh âm lượng theo dB (dương = tăng, âm = giảm, 0 = giữ nguyên).
     Ném RuntimeError nếu FFmpeg thất bại (trừ khi bị dừng)."""
@@ -924,12 +948,12 @@ def render_segment(video_path, start_time, segment_duration, output_path, speed=
                 fd, title_png = tempfile.mkstemp(suffix='.png', prefix='title_')
                 os.close(fd)
                 if py == 0:
-                    # Video lấp kín khung 9:16 (không còn vùng đen phía trên): căn giữa, cách lề trên 260px
+                    # Video lấp kín khung 9:16 (không còn vùng đen phía trên): căn giữa, đỉnh ô ngay dưới vùng an toàn
                     title_opts = dict(frame_opts, halign='center')
                     title_h = render_title_image(text, title_opts, title_png)
                 else:
                     title_h = render_title_image(text, frame_opts, title_png)
-                title_y = compute_title_y(title_h, frame_opts.get('top_offset', 0), frame_opts.get('safe_top'))  # đỉnh ô chữ nằm dưới vùng an toàn TikTok
+                title_y = compute_title_y(title_h, py)  # ô chữ nằm giữa vùng an toàn (240px) và mép trên video
         elif resolution_preset == '960x720':
             vf_filters.append('scale=-1:720,crop=960:720')
         elif '1080x1920' in resolution_preset:

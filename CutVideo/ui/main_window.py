@@ -12,7 +12,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 CONFIG_PATH = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)), 'settings.json')
 def load_settings():
-    defaults = {'min_len': 120, 'max_len': 180, 'speed': 1.1, 'resolution': '1080x1080 (1:1 Vuông FHD)', 'delete_original': False, 'input_dir': '', 'output_dir': '', 'title_enabled': True, 'title_size': 42, 'title_color': '#000000', 'title_halign': 'center', 'box_enabled': True, 'box_color': '#FFFFFF', 'box_opacity': 100, 'box_radius': 30, 'box_pad_x': 55, 'box_pad_y': 75, 'margin_x': 240, 'limit_enabled': False, 'limit_count': 2, 'even_enabled': False, 'even_count': 4, 'parallel': 2, 'name_style': 'paren', 'volume_db': 0.0, 'safe_top': 240, 'live_preview': True}
+    defaults = {'min_len': 120, 'max_len': 180, 'speed': 1.1, 'resolution': '1080x1080 (1:1 Vuông FHD)', 'delete_original': False, 'input_dir': '', 'output_dir': '', 'title_enabled': True, 'title_size': 42, 'title_color': '#000000', 'title_halign': 'center', 'box_enabled': True, 'box_color': '#FFFFFF', 'box_opacity': 100, 'box_radius': 30, 'box_pad_x': 55, 'box_pad_y': 75, 'margin_x': 240, 'limit_enabled': False, 'limit_count': 2, 'even_enabled': False, 'even_count': 4, 'parallel': 2, 'name_style': 'paren', 'volume_db': 0.0, 'live_preview': True}
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -566,7 +566,7 @@ class MainWindow(QMainWindow):
         title_card.setProperty('class', 'card')
         title_grid = QGridLayout(title_card)
         title_grid.setSpacing(10)
-        self.chk_title = QCheckBox('📱 Khung 9:16 (1080x1920) nền đen: video cắt theo tỉ lệ ở mục Resolution, đặt giữa; tiêu đề (tên đoạn -1, -2...) nằm dưới vùng an toàn phía trên của TikTok (cách nút tìm kiếm)')
+        self.chk_title = QCheckBox('📱 Khung 9:16 (1080x1920) nền đen: video cắt theo tỉ lệ ở mục Resolution, đặt giữa; tiêu đề (tên đoạn -1, -2...) luôn nằm giữa vùng an toàn phía trên của TikTok (240px) và mép trên video')
         title_grid.addWidget(self.chk_title, 0, 0, 1, 4)
         title_grid.addWidget(QLabel('Cỡ chữ (px):'), 1, 0)
         self.spn_title_size = QSpinBox()
@@ -583,12 +583,6 @@ class MainWindow(QMainWindow):
         self.cmb_title_halign.addItem('Trái', 'left')
         self.cmb_title_halign.addItem('Phải', 'right')
         title_grid.addWidget(self.cmb_title_halign, 2, 1)
-        title_grid.addWidget(QLabel('Vùng an toàn trên (px):'), 2, 2)
-        self.spn_safe_top = QSpinBox()
-        self.spn_safe_top.setRange(0, 1900)
-        self.spn_safe_top.setValue(TIKTOK_SAFE_TOP)
-        self.spn_safe_top.setToolTip('Khoảng cách từ mép trên khung 1080x1920 tới đỉnh ô tiêu đề (mặc định ' + str(TIKTOK_SAFE_TOP) + ').')
-        title_grid.addWidget(self.spn_safe_top, 2, 3)
         self.chk_box = QCheckBox('🔲 Thêm nền (ô) phía sau chữ tiêu đề')
         self.chk_box.setChecked(True)
         title_grid.addWidget(self.chk_box, 3, 0, 1, 4)
@@ -611,7 +605,7 @@ class MainWindow(QMainWindow):
         self.spn_margin_x = QSpinBox()
         self.spn_margin_x.setRange(0, 400)
         self.spn_margin_x.setValue(180)
-        self.spn_margin_x.setToolTip('Khoảng cách từ ô tới mép trái/phải khung. Lề càng lớn thì ô tiêu đề càng hẹp (xuống dòng nhiều hơn), lề càng nhỏ thì ô càng rộng')
+        self.spn_margin_x.setToolTip('Khoảng cách từ ô tới mép trái/phải khung. Lề càng lớn thì ô tiêu đề càng hẹp (xuống dòng nhiều hơn), lề càng nhỏ thì ô càng rộng. Tiêu đề dài hơn 3 dòng sẽ tự giảm lề dần (tối thiểu 120px) cho tới khi còn 3 dòng')
         title_grid.addWidget(self.spn_margin_x, 5, 3)
         title_grid.addWidget(QLabel('Đệm ngang (% cỡ chữ):'), 6, 0)
         self.spn_box_pad_x = QSpinBox()
@@ -709,7 +703,6 @@ class MainWindow(QMainWindow):
         self.spn_margin_x.setValue(int(saved_cfg.get('margin_x', 240)))
         self.spn_box_pad_x.setValue(int(saved_cfg.get('box_pad_x', 55)))
         self.spn_box_pad_y.setValue(int(saved_cfg.get('box_pad_y', 75)))
-        self.spn_safe_top.setValue(int(saved_cfg.get('safe_top', TIKTOK_SAFE_TOP)))
         self.chk_live.setChecked(bool(saved_cfg.get('live_preview', True)))
         idx_h = self.cmb_title_halign.findData(saved_cfg.get('title_halign', 'center'))
         self.cmb_title_halign.setCurrentIndex(idx_h if idx_h >= 0 else 0)
@@ -736,13 +729,12 @@ class MainWindow(QMainWindow):
         self.chk_box.stateChanged.connect(self.save_current_settings)
         self.spn_title_size.valueChanged.connect(self.save_current_settings)
         self.cmb_title_halign.currentIndexChanged.connect(self.save_current_settings)
-        extra_spins = (self.spn_safe_top,)
-        for spn in (self.spn_box_opacity, self.spn_box_radius, self.spn_margin_x, self.spn_box_pad_x, self.spn_box_pad_y) + extra_spins:
+        for spn in (self.spn_box_opacity, self.spn_box_radius, self.spn_margin_x, self.spn_box_pad_x, self.spn_box_pad_y):
             spn.valueChanged.connect(self.save_current_settings)
         self.chk_live.stateChanged.connect(self.save_current_settings)
         # Xem trước tự cập nhật (debounce 250ms) khi đổi bất kỳ thông số tiêu đề nào
         live_spins = (self.spn_title_size, self.spn_box_opacity, self.spn_box_radius, self.spn_margin_x,
-                      self.spn_box_pad_x, self.spn_box_pad_y) + extra_spins
+                      self.spn_box_pad_x, self.spn_box_pad_y)
         for spn in live_spins:
             spn.valueChanged.connect(self._schedule_preview)
         self.cmb_title_halign.currentIndexChanged.connect(self._schedule_preview)
@@ -865,7 +857,7 @@ class MainWindow(QMainWindow):
         enabled = self.chk_title.isChecked()
         box_on = enabled and self.chk_box.isChecked()
         for w in (self.spn_title_size, self.btn_title_color, self.cmb_title_halign,
-                  self.spn_margin_x, self.chk_box, self.spn_safe_top, self.chk_live, self.btn_title_preview, self.txt_title_test):
+                  self.spn_margin_x, self.chk_box, self.chk_live, self.btn_title_preview, self.txt_title_test):
             w.setEnabled(enabled)
         for w in (self.btn_box_color, self.spn_box_opacity, self.spn_box_radius,
                   self.spn_box_pad_x, self.spn_box_pad_y):
@@ -904,8 +896,7 @@ class MainWindow(QMainWindow):
         return self._build_title_opts()
     def _preview_info(self):
         o = self._build_title_opts()
-        info = (f"cỡ {o['size']} | đệm ngang {o['box_pad_x']} dọc {o['box_pad_y']} | bo {o['box_radius']} | lề {o['margin_x']}"
-                f" | an toàn {o['safe_top']}")
+        info = (f"cỡ {o['size']} | đệm ngang {o['box_pad_x']} dọc {o['box_pad_y']} | bo {o['box_radius']} | lề {o['margin_x']}")
         _eng = sys.modules.get(render_title_preview.__module__)
         info += f" | engine: {getattr(_eng, 'TITLE_LAYOUT', 'CŨ')} @ {os.path.abspath(getattr(_eng, '__file__', '?'))}"
         return info
@@ -964,13 +955,12 @@ class MainWindow(QMainWindow):
         opts = {'size': self.spn_title_size.value(), 'color': self.title_color,
                 'halign': self.cmb_title_halign.currentData(),
                 'box_enabled': self.chk_box.isChecked(), 'box_color': self.box_color, 'box_opacity': self.spn_box_opacity.value() if self.chk_box.isChecked() else 0, 'box_radius': self.spn_box_radius.value(),
-                'box_pad_x': self.spn_box_pad_x.value(), 'box_pad_y': self.spn_box_pad_y.value(), 'margin_x': self.spn_margin_x.value(),
-                'safe_top': self.spn_safe_top.value()}
+                'box_pad_x': self.spn_box_pad_x.value(), 'box_pad_y': self.spn_box_pad_y.value(), 'margin_x': self.spn_margin_x.value()}
         opts.update(TITLE_FIXED)
         return opts
     def save_current_settings(self):
         cfg = {'min_len': self.spn_min_len.value(), 'max_len': self.spn_max_len.value(), 'speed': self.spn_speed.value(), 'resolution': self.cmb_resolution.currentText(), 'delete_original': self.chk_delete_original.isChecked(), 'input_dir': self.txt_input_dir.text().strip(), 'output_dir': self.txt_output_dir.text().strip(), 'title_enabled': self.chk_title.isChecked(), 'title_size': self.spn_title_size.value(), 'title_color': self.title_color, 'title_halign': self.cmb_title_halign.currentData(), 'box_enabled': self.chk_box.isChecked(), 'box_color': self.box_color, 'box_opacity': self.spn_box_opacity.value(), 'box_radius': self.spn_box_radius.value(), 'box_pad_x': self.spn_box_pad_x.value(), 'box_pad_y': self.spn_box_pad_y.value(), 'margin_x': self.spn_margin_x.value(), 'limit_enabled': self.chk_limit.isChecked(), 'limit_count': self.spn_limit.value(), 'even_enabled': self.chk_even.isChecked(), 'even_count': self.spn_even.value(), 'parallel': self.spn_parallel.value(), 'name_style': self.cmb_name_style.currentData(), 'volume_db': self.spn_volume.value(),
-               'safe_top': self.spn_safe_top.value(), 'live_preview': self.chk_live.isChecked()}
+               'live_preview': self.chk_live.isChecked()}
         save_settings(cfg)
     def closeEvent(self, event):
         self.save_current_settings()
