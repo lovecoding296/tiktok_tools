@@ -12,7 +12,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 CONFIG_PATH = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)), 'settings.json')
 def load_settings():
-    defaults = {'min_len': 120, 'max_len': 180, 'speed': 1.1, 'resolution': '1080x1080 (1:1 Vuông FHD)', 'delete_original': False, 'input_dir': '', 'output_dir': '', 'title_enabled': True, 'title_size': 12, 'title_color': '#000000', 'title_halign': 'center', 'title_gap': 50, 'box_enabled': True, 'box_color': '#FFFFFF', 'box_opacity': 100, 'box_radius': 30, 'box_pad_x': 50, 'box_pad_y': 25, 'margin_x': 120, 'line_height': 125, 'limit_enabled': False, 'limit_count': 2, 'even_enabled': False, 'even_count': 4, 'parallel': 2, 'name_style': 'pt', 'volume_db': 0.0, 'hashtag_enabled': True, 'hashtag_max': 3}
+    defaults = {'min_len': 120, 'max_len': 180, 'speed': 1.1, 'resolution': '1080x1080 (1:1 Vuông FHD)', 'delete_original': False, 'input_dir': '', 'output_dir': '', 'title_enabled': True, 'title_size': 42, 'title_color': '#000000', 'title_halign': 'center', 'box_enabled': True, 'box_color': '#FFFFFF', 'box_opacity': 100, 'box_radius': 30, 'box_pad_x': 55, 'box_pad_y': 75, 'margin_x': 240, 'limit_enabled': False, 'limit_count': 2, 'even_enabled': False, 'even_count': 4, 'parallel': 2, 'name_style': 'paren', 'volume_db': 0.0, 'safe_top': 240, 'live_preview': True}
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -33,12 +33,11 @@ def save_settings(data):
         return None
 
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QIcon, QTextCursor, QColor, QPixmap
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QSpinBox, QDoubleSpinBox, QComboBox, QProgressBar, QTextEdit, QFrame, QGroupBox, QMessageBox, QGridLayout, QSplitter, QCheckBox, QColorDialog, QTabWidget, QStackedWidget, QButtonGroup, QLayout, QApplication
 from core.utils import check_h264_encoder, cleanup_temp_dir
-from core.video_engine import find_break_points, render_segment, get_video_duration, reset_encoder_state, render_title_preview, CANVAS_W, CANVAS_H, _find_title_font, font_search_report
-from core.title_tools import prepare_title_and_hashtags, data_file_path, PROTECTED_FILE, BLACKLIST_FILE
+from core.video_engine import find_break_points, render_segment, get_video_duration, reset_encoder_state, render_title_preview, CANVAS_W, CANVAS_H, TIKTOK_SAFE_TOP, _find_title_font, font_search_report
 DARK_STYLESHEET = '\nQMainWindow {\n    background-color: #121318;\n}\nQWidget {\n    color: #e0e6ed;\n    font-family: \'Segoe UI\', Arial, sans-serif;\n    font-size: 13px;\n}\nQFrame.card {\n    background-color: #1a1c24;\n    border-radius: 10px;\n    border: 1px solid #2a2d3d;\n    padding: 12px;\n}\nQLabel {\n    color: #c5cedb;\n}\nQLabel.title {\n    font-size: 20px;\n    font-weight: bold;\n    color: #00d2ff;\n}\nQLabel.subtitle {\n    font-size: 12px;\n    color: #8a96a8;\n}\nQLabel.gpu-badge {\n    background-color: #0d3b2e;\n    color: #00ffaa;\n    border: 1px solid #00aa66;\n    border-radius: 6px;\n    padding: 4px 8px;\n    font-weight: bold;\n    font-size: 11px;\n}\nQLineEdit, QSpinBox, QDoubleSpinBox {\n    background-color: #121318;\n    border: 1px solid #32374a;\n    border-radius: 6px;\n    padding: 6px 10px;\n    color: #ffffff;\n    selection-background-color: #0088cc;\n}\nQLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {\n    border: 1px solid #00d2ff;\n}\nQComboBox {\n    background-color: #1a1c24;\n    border: 1px solid #32374a;\n    border-radius: 6px;\n    padding: 6px 10px;\n    color: #ffffff;\n    font-weight: bold;\n}\nQComboBox:focus {\n    border: 1px solid #00d2ff;\n}\nQComboBox QAbstractItemView {\n    background-color: #1a1c24;\n    color: #ffffff;\n    border: 1px solid #00d2ff;\n    selection-background-color: #0088cc;\n    selection-color: #ffffff;\n    padding: 4px;\n    outline: 0px;\n}\nQComboBox QAbstractItemView::item {\n    color: #ffffff;\n    background-color: #1a1c24;\n    padding: 8px 12px;\n    min-height: 26px;\n}\nQComboBox QAbstractItemView::item:hover,\nQComboBox QAbstractItemView::item:selected {\n    background-color: #0088cc;\n    color: #ffffff;\n    font-weight: bold;\n}\nQCheckBox {\n    color: #e0e6ed;\n    font-weight: bold;\n}\nQCheckBox::indicator {\n    width: 18px;\n    height: 18px;\n    border-radius: 4px;\n    border: 1px solid #32374a;\n    background-color: #121318;\n}\nQCheckBox::indicator:checked {\n    background-color: #00d2ff;\n    border-color: #00d2ff;\n}\nQPushButton {\n    background-color: #242938;\n    color: #ffffff;\n    border: 1px solid #3a4158;\n    border-radius: 6px;\n    padding: 8px 16px;\n    font-weight: bold;\n}\nQPushButton:hover {\n    background-color: #2f364a;\n    border-color: #00d2ff;\n}\nQPushButton:pressed {\n    background-color: #1c202e;\n}\nQPushButton.btn-primary {\n    background-color: #0099e6;\n    color: #ffffff;\n    border: none;\n    font-size: 14px;\n    padding: 10px 24px;\n}\nQPushButton.btn-primary:hover {\n    background-color: #00b3ff;\n}\nQPushButton.btn-danger {\n    background-color: #8b0000;\n    color: #ffffff;\n    border: 1px solid #ff4444;\n}\nQPushButton.btn-danger:hover {\n    background-color: #cc0000;\n}\nQProgressBar {\n    background-color: #121318;\n    border: 1px solid #2a2d3d;\n    border-radius: 6px;\n    text-align: center;\n    color: #ffffff;\n    font-weight: bold;\n}\nQProgressBar::chunk {\n    background-color: #00d2ff;\n    border-radius: 5px;\n}\nQTextEdit {\n    background-color: #0e0f14;\n    border: 1px solid #222533;\n    border-radius: 6px;\n    color: #a0aec0;\n    font-family: \'Consolas\', \'Courier New\', monospace;\n    font-size: 12px;\n}\n'
 DARK_STYLESHEET += """
 QTabWidget::pane { border: none; background: transparent; top: 0px; }
@@ -51,6 +50,8 @@ QPushButton[tab="true"] { background-color: #1a1c24; color: #8a96a8; border: 1px
 QPushButton[tab="true"]:hover { background-color: #20232f; color: #ffffff; border-color: #2a2d3d; }
 QPushButton[tab="true"]:checked { background-color: #242938; color: #00d2ff; border-color: #00d2ff; }
 """
+# Thông số tiêu đề gán cứng (theo settings.json), không hiển thị trên giao diện
+TITLE_FIXED = {'line_height': 100, 'font_weight': 700, 'font_width': 100, 'min_gap': 0, 'merge_step': 2.0, 'text_dy': 0, 'supersample': 4}
 NAME_STYLES = (('Pt. 1, Pt. 2, ...', 'pt'), ('-1, -2, ...', 'dash'), ('(1), (2), ...', 'paren'), ('1편, 2편, ...', 'pyeon'))
 def format_segment_name(base_name, index, style):
     """Tên file (không đuôi) của đoạn thứ `index` (đếm từ 1) theo kiểu đã chọn."""
@@ -66,7 +67,7 @@ class ProcessingWorker(QThread):
     progress_signal = pyqtSignal(int, int)
     file_progress_signal = pyqtSignal(str, int)
     finished_signal = pyqtSignal()
-    def __init__(self, input_dir, output_dir, min_len, max_len, speed, resolution, encoder, delete_original, title_opts=None, max_segments=None, parallel=2, name_style='pt', volume_db=0.0, even_only=False, hashtag_enabled=False, hashtag_max=3):
+    def __init__(self, input_dir, output_dir, min_len, max_len, speed, resolution, encoder, delete_original, title_opts=None, max_segments=None, parallel=2, name_style='pt', volume_db=0.0, even_only=False):
         super().__init__()
         self.input_dir = input_dir
         self.output_dir = output_dir
@@ -82,8 +83,6 @@ class ProcessingWorker(QThread):
         self.parallel = max(1, int(parallel))  # số ffmpeg chạy cùng lúc
         self.name_style = name_style  # 'pt' | 'dash' | 'paren' | 'pyeon'
         self.volume_db = float(volume_db)  # chỉnh âm lượng (dB): dương = tăng, âm = giảm
-        self.hashtag_enabled = bool(hashtag_enabled)  # thêm hashtag vào cuối tên file (không hiện trên video)
-        self.hashtag_max = max(1, min(3, int(hashtag_max)))
         self.is_running = True
         self._procs = set()
         self._proc_lock = threading.Lock()
@@ -254,12 +253,7 @@ class ProcessingWorker(QThread):
                         self.log_signal.emit(f'   [Đoạn {s_i + 1}] {break_points[s_i]:.1f}s -> {break_points[s_i + 1]:.1f}s (Độ dài: {seg_len:.1f}s)', 'default')
 
                     base_name = os.path.splitext(file_name)[0]
-                    name_base, hashtags = base_name, []  # name_base: chữ chèn lên video (đã bỏ hashtag); hashtags: chỉ thêm vào tên file
-                    if self.hashtag_enabled:
-                        name_base, hashtags, tag_src = prepare_title_and_hashtags(base_name, self.hashtag_max)
-                        if hashtags:
-                            src_txt = 'có sẵn trong tiêu đề' if tag_src == 'title' else 'tự tạo'
-                            self.log_signal.emit(f"-> Hashtag ({src_txt}): {' '.join(hashtags)}", 'success')
+                    name_base = base_name  # chữ chèn lên video = tên gốc, giữ nguyên
                     save_dir = self._output_subdir(video_path)
                     os.makedirs(save_dir, exist_ok=True)
 
@@ -270,8 +264,8 @@ class ProcessingWorker(QThread):
                             seg_stem = name_base
                         else:
                             seg_stem = format_segment_name(name_base, seg_idx + 1, self.name_style)
-                        out_segment_name = (f"{seg_stem} {' '.join(hashtags)}" if hashtags else seg_stem) + '.mp4'
-                        seg_title = dict(self.title_opts, text=seg_stem) if self.title_opts is not None else None  # chữ trên video: KHÔNG có hashtag
+                        out_segment_name = seg_stem + '.mp4'
+                        seg_title = dict(self.title_opts, text=seg_stem) if self.title_opts is not None else None
                         futures.append(pool.submit(self._render_task, video_path, start_t, seg_duration,
                                                    os.path.join(save_dir, out_segment_name), out_segment_name, seg_title))
                     pending.append({'path': video_path, 'name': file_name, 'futures': futures, 'n': num_segments,
@@ -329,6 +323,16 @@ class TitlePreviewWindow(QWidget):
         else:
             pct = 100
         self.setWindowTitle(f'Xem trước tiêu đề ({CANVAS_W}x{CANVAS_H}, hiển thị {pct}%) - font: {self._font_name or "?"} | {self._info}')
+    def set_content(self, pil_image, text, font_name='', info=''):
+        self._font_name = font_name
+        self._info = info
+        buf = io.BytesIO()
+        pil_image.save(buf, format='PNG')
+        pix = QPixmap()
+        pix.loadFromData(buf.getvalue(), 'PNG')
+        self._pix = pix
+        self.lbl.setToolTip(text)
+        self._refresh_title_and_pixmap()
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._refresh_title_and_pixmap()
@@ -533,23 +537,6 @@ class MainWindow(QMainWindow):
         # Hai chế độ giới hạn loại trừ nhau
         self.chk_limit.toggled.connect(lambda on: on and self.chk_even.setChecked(False))
         self.chk_even.toggled.connect(lambda on: on and self.chk_limit.setChecked(False))
-        self.chk_hashtag = QCheckBox('🏷 Thêm hashtag (từ có sẵn trong tiêu đề, hoặc tự tạo) vào cuối tên file - không hiện trên video:')
-        self.chk_hashtag.setToolTip('Tiêu đề đã có #hashtag thì dùng luôn (tối đa 3) và xóa chúng khỏi chữ chèn lên video; chưa có thì tự tạo từ khóa phổ biến.')
-        general_grid.addWidget(self.chk_hashtag, 4, 0)
-        self.spn_hashtag_max = QSpinBox()
-        self.spn_hashtag_max.setRange(1, 3)
-        self.spn_hashtag_max.setValue(3)
-        self.spn_hashtag_max.setSuffix(' hashtag tối đa')
-        general_grid.addWidget(self.spn_hashtag_max, 4, 1)
-        self.chk_hashtag.toggled.connect(self.spn_hashtag_max.setEnabled)
-        txt_btns = QHBoxLayout()
-        btn_edit_protected = QPushButton('📝 Sửa cụm từ không ngắt dòng (' + PROTECTED_FILE + ')')
-        btn_edit_protected.clicked.connect(lambda: self.open_data_file(PROTECTED_FILE))
-        btn_edit_blacklist = QPushButton('📝 Sửa từ không tạo hashtag (' + BLACKLIST_FILE + ')')
-        btn_edit_blacklist.clicked.connect(lambda: self.open_data_file(BLACKLIST_FILE))
-        txt_btns.addWidget(btn_edit_protected)
-        txt_btns.addWidget(btn_edit_blacklist)
-        general_grid.addLayout(txt_btns, 5, 0, 1, 2)
         general_grid.setColumnStretch(0, 1)
         general_grid.setColumnStretch(1, 1)
         general_page_layout.addWidget(general_card)
@@ -579,7 +566,7 @@ class MainWindow(QMainWindow):
         title_card.setProperty('class', 'card')
         title_grid = QGridLayout(title_card)
         title_grid.setSpacing(10)
-        self.chk_title = QCheckBox('📱 Khung 9:16 (1080x1920) nền đen: video cắt theo tỉ lệ ở mục Resolution, đặt giữa; tiêu đề (tên đoạn -1, -2...) nằm trong vùng đen phía trên video')
+        self.chk_title = QCheckBox('📱 Khung 9:16 (1080x1920) nền đen: video cắt theo tỉ lệ ở mục Resolution, đặt giữa; tiêu đề (tên đoạn -1, -2...) nằm dưới vùng an toàn phía trên của TikTok (cách nút tìm kiếm)')
         title_grid.addWidget(self.chk_title, 0, 0, 1, 4)
         title_grid.addWidget(QLabel('Cỡ chữ (px):'), 1, 0)
         self.spn_title_size = QSpinBox()
@@ -596,11 +583,12 @@ class MainWindow(QMainWindow):
         self.cmb_title_halign.addItem('Trái', 'left')
         self.cmb_title_halign.addItem('Phải', 'right')
         title_grid.addWidget(self.cmb_title_halign, 2, 1)
-        title_grid.addWidget(QLabel('Cách mép trên video (px):'), 2, 2)
-        self.spn_title_gap = QSpinBox()
-        self.spn_title_gap.setRange(0, 1000)
-        self.spn_title_gap.setValue(50)
-        title_grid.addWidget(self.spn_title_gap, 2, 3)
+        title_grid.addWidget(QLabel('Vùng an toàn trên (px):'), 2, 2)
+        self.spn_safe_top = QSpinBox()
+        self.spn_safe_top.setRange(0, 1900)
+        self.spn_safe_top.setValue(TIKTOK_SAFE_TOP)
+        self.spn_safe_top.setToolTip('Khoảng cách từ mép trên khung 1080x1920 tới đỉnh ô tiêu đề (mặc định ' + str(TIKTOK_SAFE_TOP) + ').')
+        title_grid.addWidget(self.spn_safe_top, 2, 3)
         self.chk_box = QCheckBox('🔲 Thêm nền (ô) phía sau chữ tiêu đề')
         self.chk_box.setChecked(True)
         title_grid.addWidget(self.chk_box, 3, 0, 1, 4)
@@ -622,7 +610,7 @@ class MainWindow(QMainWindow):
         title_grid.addWidget(QLabel('Lề hai bên (px):'), 5, 2)
         self.spn_margin_x = QSpinBox()
         self.spn_margin_x.setRange(0, 400)
-        self.spn_margin_x.setValue(120)
+        self.spn_margin_x.setValue(180)
         self.spn_margin_x.setToolTip('Khoảng cách từ ô tới mép trái/phải khung. Lề càng lớn thì ô tiêu đề càng hẹp (xuống dòng nhiều hơn), lề càng nhỏ thì ô càng rộng')
         title_grid.addWidget(self.spn_margin_x, 5, 3)
         title_grid.addWidget(QLabel('Đệm ngang (% cỡ chữ):'), 6, 0)
@@ -635,12 +623,9 @@ class MainWindow(QMainWindow):
         self.spn_box_pad_y.setRange(0, 300)
         self.spn_box_pad_y.setValue(25)
         title_grid.addWidget(self.spn_box_pad_y, 6, 3)
-        title_grid.addWidget(QLabel('Giãn dòng (% cỡ chữ):'), 7, 0)
-        self.spn_line_height = QSpinBox()
-        self.spn_line_height.setRange(60, 300)
-        self.spn_line_height.setValue(125)
-        self.spn_line_height.setToolTip('Khoảng cách giữa các dòng chữ. Càng nhỏ các dòng càng sát nhau (TikTok ≈ 115-130)')
-        title_grid.addWidget(self.spn_line_height, 7, 1)
+        self.chk_live = QCheckBox('🔄 Xem trước tự cập nhật khi đổi thông số (khi cửa sổ xem trước đang mở)')
+        self.chk_live.setChecked(True)
+        title_grid.addWidget(self.chk_live, 7, 0, 1, 4)
         title_grid.addWidget(QLabel('Tiêu đề test:'), 8, 0)
         self.txt_title_test = QLineEdit('How Fast Is IShowSpeed Actually? (2)')
         self.txt_title_test.setPlaceholderText('Nhập tiêu đề để xem trước...')
@@ -651,6 +636,10 @@ class MainWindow(QMainWindow):
         self.txt_title_test.returnPressed.connect(self.show_title_preview)
         title_grid.addWidget(self.btn_title_preview, 8, 3)
         self._preview_windows = []
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(250)
+        self._preview_timer.timeout.connect(lambda: self.show_title_preview(auto=True))
         self.title_color = '#000000'
         self.box_color = '#FFFFFF'
         self.chk_title.toggled.connect(self.update_title_controls)
@@ -699,7 +688,7 @@ class MainWindow(QMainWindow):
                 if '1080x1080' in self.cmb_resolution.itemText(i):
                     self.cmb_resolution.setCurrentIndex(i)
                     break
-        idx_ns = self.cmb_name_style.findData(saved_cfg.get('name_style', 'pt'))
+        idx_ns = self.cmb_name_style.findData(saved_cfg.get('name_style', 'paren'))
         self.cmb_name_style.setCurrentIndex(idx_ns if idx_ns >= 0 else 0)
         self.chk_delete_original.setChecked(saved_cfg.get('delete_original', False))
         self.chk_limit.setChecked(bool(saved_cfg.get('limit_enabled', False)))
@@ -710,21 +699,18 @@ class MainWindow(QMainWindow):
         self.spn_even.setEnabled(self.chk_even.isChecked())
         self.spn_parallel.setValue(int(saved_cfg.get('parallel', 2)))
         self.spn_volume.setValue(float(saved_cfg.get('volume_db', 0.0)))
-        self.chk_hashtag.setChecked(bool(saved_cfg.get('hashtag_enabled', True)))
-        self.spn_hashtag_max.setValue(max(1, min(3, int(saved_cfg.get('hashtag_max', 3)))))
-        self.spn_hashtag_max.setEnabled(self.chk_hashtag.isChecked())
         self.chk_title.setChecked(bool(saved_cfg.get('title_enabled', True)))
-        self.spn_title_size.setValue(int(saved_cfg.get('title_size', 12)))
-        self.spn_title_gap.setValue(int(saved_cfg.get('title_gap', 50)))
+        self.spn_title_size.setValue(int(saved_cfg.get('title_size', 42)))
         self.set_title_color(saved_cfg.get('title_color', '#000000'))
         self.chk_box.setChecked(bool(saved_cfg.get('box_enabled', True)))
         self.set_box_color(saved_cfg.get('box_color', '#FFFFFF'))
         self.spn_box_opacity.setValue(int(saved_cfg.get('box_opacity', 100)))
         self.spn_box_radius.setValue(int(saved_cfg.get('box_radius', 30)))
-        self.spn_margin_x.setValue(int(saved_cfg.get('margin_x', 120)))
-        self.spn_box_pad_x.setValue(int(saved_cfg.get('box_pad_x', 50)))
-        self.spn_box_pad_y.setValue(int(saved_cfg.get('box_pad_y', 25)))
-        self.spn_line_height.setValue(int(saved_cfg.get('line_height', 125)))
+        self.spn_margin_x.setValue(int(saved_cfg.get('margin_x', 240)))
+        self.spn_box_pad_x.setValue(int(saved_cfg.get('box_pad_x', 55)))
+        self.spn_box_pad_y.setValue(int(saved_cfg.get('box_pad_y', 75)))
+        self.spn_safe_top.setValue(int(saved_cfg.get('safe_top', TIKTOK_SAFE_TOP)))
+        self.chk_live.setChecked(bool(saved_cfg.get('live_preview', True)))
         idx_h = self.cmb_title_halign.findData(saved_cfg.get('title_halign', 'center'))
         self.cmb_title_halign.setCurrentIndex(idx_h if idx_h >= 0 else 0)
         self.update_title_controls()
@@ -744,17 +730,37 @@ class MainWindow(QMainWindow):
         self.spn_even.valueChanged.connect(self.save_current_settings)
         self.spn_parallel.valueChanged.connect(self.save_current_settings)
         self.spn_volume.valueChanged.connect(self.save_current_settings)
-        self.chk_hashtag.stateChanged.connect(self.save_current_settings)
-        self.spn_hashtag_max.valueChanged.connect(self.save_current_settings)
         self.txt_input_dir.textChanged.connect(self.save_current_settings)
         self.txt_output_dir.textChanged.connect(self.save_current_settings)
         self.chk_title.stateChanged.connect(self.save_current_settings)
         self.chk_box.stateChanged.connect(self.save_current_settings)
         self.spn_title_size.valueChanged.connect(self.save_current_settings)
-        self.spn_title_gap.valueChanged.connect(self.save_current_settings)
         self.cmb_title_halign.currentIndexChanged.connect(self.save_current_settings)
-        for spn in (self.spn_box_opacity, self.spn_box_radius, self.spn_margin_x, self.spn_box_pad_x, self.spn_box_pad_y, self.spn_line_height):
+        extra_spins = (self.spn_safe_top,)
+        for spn in (self.spn_box_opacity, self.spn_box_radius, self.spn_margin_x, self.spn_box_pad_x, self.spn_box_pad_y) + extra_spins:
             spn.valueChanged.connect(self.save_current_settings)
+        self.chk_live.stateChanged.connect(self.save_current_settings)
+        # Xem trước tự cập nhật (debounce 250ms) khi đổi bất kỳ thông số tiêu đề nào
+        live_spins = (self.spn_title_size, self.spn_box_opacity, self.spn_box_radius, self.spn_margin_x,
+                      self.spn_box_pad_x, self.spn_box_pad_y) + extra_spins
+        for spn in live_spins:
+            spn.valueChanged.connect(self._schedule_preview)
+        self.cmb_title_halign.currentIndexChanged.connect(self._schedule_preview)
+        self.cmb_resolution.currentIndexChanged.connect(self._schedule_preview)
+        self.chk_box.stateChanged.connect(self._schedule_preview)
+        self.chk_title.stateChanged.connect(self._schedule_preview)
+        self.txt_title_test.textChanged.connect(self._schedule_preview)
+    def _schedule_preview(self, *_):
+        if hasattr(self, 'chk_live') and self.chk_live.isChecked():
+            self._preview_timer.start()
+    def _alive_preview(self):
+        for w in self._preview_windows:
+            try:
+                if w.isVisible():
+                    return w
+            except RuntimeError:
+                pass
+        return None
     def _snap_even(self, v):
         """Ép giá trị N luôn chẵn (lẻ -> lùi xuống số chẵn gần nhất)."""
         if v % 2:
@@ -805,13 +811,6 @@ class MainWindow(QMainWindow):
             os.startfile(out_path)
         else:
             QMessageBox.warning(self, 'Cảnh báo', 'Thư mục đầu ra chưa tồn tại!')
-    def open_data_file(self, name):
-        """Mở file danh sách (protected_phrases.txt / hashtag_blacklist.txt) bằng trình soạn thảo mặc định; chưa có thì tự tạo file mẫu."""
-        path = data_file_path(name)
-        try:
-            os.startfile(path)
-        except Exception as e:
-            QMessageBox.warning(self, 'Cảnh báo', f'Không mở được file:\n{path}\n{e}')
     def append_log(self, text, color_type='default'):
         cursor = self.txt_log.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -856,7 +855,7 @@ class MainWindow(QMainWindow):
                     self.btn_start.setEnabled(False)
                     self.btn_stop.setEnabled(True)
                     self.txt_log.clear()
-                    self.worker = ProcessingWorker(input_dir=in_dir, output_dir=out_dir, min_len=min_l, max_len=max_l, speed=speed, resolution=res, encoder=encoder, delete_original=delete_orig, title_opts=self.get_title_opts(), max_segments=max_seg, even_only=self.chk_even.isChecked(), parallel=self.spn_parallel.value(), name_style=self.cmb_name_style.currentData(), volume_db=self.spn_volume.value(), hashtag_enabled=self.chk_hashtag.isChecked(), hashtag_max=self.spn_hashtag_max.value())
+                    self.worker = ProcessingWorker(input_dir=in_dir, output_dir=out_dir, min_len=min_l, max_len=max_l, speed=speed, resolution=res, encoder=encoder, delete_original=delete_orig, title_opts=self.get_title_opts(), max_segments=max_seg, even_only=self.chk_even.isChecked(), parallel=self.spn_parallel.value(), name_style=self.cmb_name_style.currentData(), volume_db=self.spn_volume.value())
                     self.worker.log_signal.connect(self.append_log)
                     self.worker.progress_signal.connect(self.update_batch_progress)
                     self.worker.file_progress_signal.connect(self.update_file_progress)
@@ -865,8 +864,8 @@ class MainWindow(QMainWindow):
     def update_title_controls(self):
         enabled = self.chk_title.isChecked()
         box_on = enabled and self.chk_box.isChecked()
-        for w in (self.spn_title_size, self.btn_title_color, self.cmb_title_halign, self.spn_title_gap,
-                  self.spn_margin_x, self.spn_line_height, self.chk_box, self.btn_title_preview, self.txt_title_test):
+        for w in (self.spn_title_size, self.btn_title_color, self.cmb_title_halign,
+                  self.spn_margin_x, self.chk_box, self.spn_safe_top, self.chk_live, self.btn_title_preview, self.txt_title_test):
             w.setEnabled(enabled)
         for w in (self.btn_box_color, self.spn_box_opacity, self.spn_box_radius,
                   self.spn_box_pad_x, self.spn_box_pad_y):
@@ -884,6 +883,7 @@ class MainWindow(QMainWindow):
         if color.isValid():
             self.set_title_color(color.name())
             self.save_current_settings()
+            self._schedule_preview()
     def set_box_color(self, hex_color):
         color = QColor(str(hex_color))
         if not color.isValid():
@@ -897,11 +897,31 @@ class MainWindow(QMainWindow):
         if color.isValid():
             self.set_box_color(color.name())
             self.save_current_settings()
+            self._schedule_preview()
     def get_title_opts(self):
         if not self.chk_title.isChecked():
             return None
         return self._build_title_opts()
-    def show_title_preview(self):
+    def _preview_info(self):
+        o = self._build_title_opts()
+        info = (f"cỡ {o['size']} | đệm ngang {o['box_pad_x']} dọc {o['box_pad_y']} | bo {o['box_radius']} | lề {o['margin_x']}"
+                f" | an toàn {o['safe_top']}")
+        _eng = sys.modules.get(render_title_preview.__module__)
+        info += f" | engine: {getattr(_eng, 'TITLE_LAYOUT', 'CŨ')} @ {os.path.abspath(getattr(_eng, '__file__', '?'))}"
+        return info
+    def show_title_preview(self, auto=False):
+        if auto:
+            win = self._alive_preview()
+            text = self.txt_title_test.text().strip()
+            if win is None or not text:
+                return
+            try:
+                img = render_title_preview(self._build_title_opts(), text, self.cmb_resolution.currentText())
+            except Exception:
+                return
+            fp = _find_title_font()
+            win.set_content(img, text, os.path.basename(fp) if fp else '', self._preview_info())
+            return
         # Đóng cửa sổ xem trước cũ rồi tạo lại 1 cửa sổ theo thông số hiện tại
         for w in self._preview_windows:
             try:
@@ -926,8 +946,7 @@ class MainWindow(QMainWindow):
         scale = min((geo.height() - frame_extra) * 0.95 / CANVAS_H, geo.width() * 0.95 / CANVAS_W, 1.0)
         w_win, h_win = max(120, int(CANVAS_W * scale)), max(200, int(CANVAS_H * scale))
         font_path = _find_title_font()
-        o = self._build_title_opts()
-        info = f"cỡ {o['size']} | đệm ngang {o['box_pad_x']} dọc {o['box_pad_y']} | giãn {o['line_height']} | bo {o['box_radius']} | lề {o['margin_x']}"
+        info = self._preview_info()
         win = TitlePreviewWindow(img, text, os.path.basename(font_path) if font_path else '', info)
         win.lbl.setToolTip(f'Font: {font_path}')
         win.resize(w_win, h_win)
@@ -942,12 +961,16 @@ class MainWindow(QMainWindow):
             box.setDetailedText(font_search_report())
             box.exec()
     def _build_title_opts(self):
-        return {'size': self.spn_title_size.value(), 'color': self.title_color,
-                'halign': self.cmb_title_halign.currentData(), 'gap': self.spn_title_gap.value(),
+        opts = {'size': self.spn_title_size.value(), 'color': self.title_color,
+                'halign': self.cmb_title_halign.currentData(),
                 'box_enabled': self.chk_box.isChecked(), 'box_color': self.box_color, 'box_opacity': self.spn_box_opacity.value() if self.chk_box.isChecked() else 0, 'box_radius': self.spn_box_radius.value(),
-                'box_pad_x': self.spn_box_pad_x.value(), 'box_pad_y': self.spn_box_pad_y.value(), 'margin_x': self.spn_margin_x.value(), 'line_height': self.spn_line_height.value()}
+                'box_pad_x': self.spn_box_pad_x.value(), 'box_pad_y': self.spn_box_pad_y.value(), 'margin_x': self.spn_margin_x.value(),
+                'safe_top': self.spn_safe_top.value()}
+        opts.update(TITLE_FIXED)
+        return opts
     def save_current_settings(self):
-        cfg = {'min_len': self.spn_min_len.value(), 'max_len': self.spn_max_len.value(), 'speed': self.spn_speed.value(), 'resolution': self.cmb_resolution.currentText(), 'delete_original': self.chk_delete_original.isChecked(), 'input_dir': self.txt_input_dir.text().strip(), 'output_dir': self.txt_output_dir.text().strip(), 'title_enabled': self.chk_title.isChecked(), 'title_size': self.spn_title_size.value(), 'title_color': self.title_color, 'title_halign': self.cmb_title_halign.currentData(), 'title_gap': self.spn_title_gap.value(), 'box_enabled': self.chk_box.isChecked(), 'box_color': self.box_color, 'box_opacity': self.spn_box_opacity.value(), 'box_radius': self.spn_box_radius.value(), 'box_pad_x': self.spn_box_pad_x.value(), 'box_pad_y': self.spn_box_pad_y.value(), 'margin_x': self.spn_margin_x.value(), 'line_height': self.spn_line_height.value(), 'limit_enabled': self.chk_limit.isChecked(), 'limit_count': self.spn_limit.value(), 'even_enabled': self.chk_even.isChecked(), 'even_count': self.spn_even.value(), 'parallel': self.spn_parallel.value(), 'name_style': self.cmb_name_style.currentData(), 'volume_db': self.spn_volume.value(), 'hashtag_enabled': self.chk_hashtag.isChecked(), 'hashtag_max': self.spn_hashtag_max.value()}
+        cfg = {'min_len': self.spn_min_len.value(), 'max_len': self.spn_max_len.value(), 'speed': self.spn_speed.value(), 'resolution': self.cmb_resolution.currentText(), 'delete_original': self.chk_delete_original.isChecked(), 'input_dir': self.txt_input_dir.text().strip(), 'output_dir': self.txt_output_dir.text().strip(), 'title_enabled': self.chk_title.isChecked(), 'title_size': self.spn_title_size.value(), 'title_color': self.title_color, 'title_halign': self.cmb_title_halign.currentData(), 'box_enabled': self.chk_box.isChecked(), 'box_color': self.box_color, 'box_opacity': self.spn_box_opacity.value(), 'box_radius': self.spn_box_radius.value(), 'box_pad_x': self.spn_box_pad_x.value(), 'box_pad_y': self.spn_box_pad_y.value(), 'margin_x': self.spn_margin_x.value(), 'limit_enabled': self.chk_limit.isChecked(), 'limit_count': self.spn_limit.value(), 'even_enabled': self.chk_even.isChecked(), 'even_count': self.spn_even.value(), 'parallel': self.spn_parallel.value(), 'name_style': self.cmb_name_style.currentData(), 'volume_db': self.spn_volume.value(),
+               'safe_top': self.spn_safe_top.value(), 'live_preview': self.chk_live.isChecked()}
         save_settings(cfg)
     def closeEvent(self, event):
         self.save_current_settings()

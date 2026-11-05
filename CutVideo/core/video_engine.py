@@ -13,7 +13,6 @@ import glob
 import unicodedata
 import numpy as np
 from .utils import FFMPEG_PATH, FFPROBE_PATH, check_h264_encoder, log_success, log_error
-from .title_tools import load_protected_phrases
 
 
 def read_wav_pcm16(wav_path):
@@ -206,7 +205,15 @@ def find_break_points(video_path, temp_dir, min_len=220, max_len=360, sr=8000, m
 
 CANVAS_W = 1080
 CANVAS_H = 1920
-TITLE_TOP_916 = 260  # video đã cắt đủ 9:16 (lấp kín khung): tiêu đề căn giữa, đỉnh ô chữ cách mép trên khung 260px
+TIKTOK_SAFE_TOP = 240  # vùng an toàn phía trên của TikTok (thanh tìm kiếm / tab): 240px tính từ mép trên khung 1080x1920 (theo bộ safe zone TikTok công bố cho quảng cáo In-Feed)
+
+
+def compute_title_y(title_h, top_offset=0, safe_top=None):
+    """Toạ độ y của đỉnh ô tiêu đề: nằm dưới vùng an toàn của TikTok (cách mép trên khung TIKTOK_SAFE_TOP px) cộng thêm top_offset px.
+    Không phụ thuộc vị trí video. Nếu tiêu đề quá cao thì kéo lên cho khỏi tràn khỏi đáy khung."""
+    off = max(0, int(top_offset))
+    st = TIKTOK_SAFE_TOP if safe_top is None else max(0, int(safe_top))
+    return min(st + off, max(0, CANVAS_H - int(title_h)))
 # False: coi pixel là vuông, dùng đúng width x height của file (960x720 -> 4:3).
 # True : nhân thêm SAR trong metadata (chỉ nên bật cho video anamorphic thật sự).
 RESPECT_SAR = False
@@ -318,7 +325,7 @@ def _find_cjk_fonts():
     return found[:1]
 
 
-def _load_title_font(path, px):
+def _load_title_font(path, px, weight=700, width=100):
     """Nạp font bằng Pillow. TikTok Sans là variable font -> ép về Bold (700), width 100, optical size lớn nhất."""
     from PIL import ImageFont
     font = ImageFont.truetype(path, px)
@@ -331,9 +338,9 @@ def _load_title_font(path, px):
         name = ax['name'].decode('latin-1') if isinstance(ax['name'], bytes) else str(ax['name'])
         name = name.lower()
         if 'weight' in name:
-            v = 700
+            v = weight
         elif 'width' in name:
-            v = 100
+            v = width
         elif 'optical' in name:
             v = ax['maximum']
         else:
@@ -507,8 +514,10 @@ class _TitleFont:
     """Bộ font vẽ tiêu đề: TikTok Sans cho chữ thường, tự chuyển sang font emoji/ký hiệu cho ký tự TikTok Sans không có."""
     BITMAP_PX = 109  # font emoji bitmap (Noto CBDT) chỉ có đúng một cỡ này
 
-    def __init__(self, px, primary_path):
+    def __init__(self, px, primary_path, weight=700, width=100):
         self.px = px
+        self.weight = weight
+        self.width_axis = width
         self.specs = [(primary_path, False)] + [(p, False) for p in _find_cjk_fonts()] + _fallback_font_specs()
         self._faces = {}
         self.primary = self._face(0)['font']
@@ -520,14 +529,14 @@ class _TitleFont:
         face = None
         try:
             if idx == 0:
-                font, scale = _load_title_font(path, self.px), 1.0
+                font, scale = _load_title_font(path, self.px, self.weight, self.width_axis), 1.0
             else:
                 from PIL import ImageFont
                 try:
                     if color:
                         font, scale = ImageFont.truetype(path, self.px), 1.0
                     else:
-                        font, scale = _load_title_font(path, self.px), 1.0  # variable font (Noto Sans KR) -> Bold
+                        font, scale = _load_title_font(path, self.px, self.weight, self.width_axis), 1.0  # variable font (Noto Sans KR) -> Bold
                 except OSError:
                     font, scale = ImageFont.truetype(path, self.BITMAP_PX), self.px / self.BITMAP_PX
             face = {'font': font, 'scale': scale, 'color': color, 'cmap': _font_cmap(path)}
@@ -590,66 +599,35 @@ class _TitleFont:
             x += font.getlength(t) * scale
 
 
-def _protected_units(text, protected):
-    """Tách tiêu đề thành các 'đơn vị' từ; các từ thuộc một cụm trong protected_phrases.txt được gộp thành một đơn vị (không bị ngắt dòng giữa chừng)."""
-    words = text.split(' ')
-    phrases = []
-    for p in protected or []:
-        pw = str(p).split()
-        if len(pw) > 1:
-            phrases.append([x.lower() for x in pw])
-    phrases.sort(key=len, reverse=True)  # cụm dài khớp trước
-    units, i = [], 0
-    while i < len(words):
-        hit = 1
-        for pw in phrases:
-            n = len(pw)
-            if i + n <= len(words) and [x.lower().strip('.,!?:;"()') for x in words[i:i + n]] == pw:
-                hit = n
-                break
-        units.append(' '.join(words[i:i + hit]))
-        i += hit
-    return units
-
-
-def wrap_title(text, measure, max_width, protected=None):
-    """Xuống dòng đơn giản theo độ rộng thật (measure(str) -> px), không giới hạn số dòng.
-    Cụm trong protected_phrases.txt được giữ liền một dòng (trừ khi cụm rộng hơn cả ô thì mới tách theo từ).
-    Từ quá dài thì cắt theo cụm ký tự."""
+def wrap_title(text, measure, max_width):
+    """Xuống dòng đơn giản theo độ rộng thật (measure(str) -> px): đầy dòng thì sang dòng mới, KHÔNG giới hạn số dòng.
+    Từ quá dài (dài hơn cả dòng) thì cắt theo cụm ký tự."""
     lines, cur = [], ''
-    for u in _protected_units(text, protected):
-        trial = f'{cur} {u}' if cur else u
+    for w in text.split(' '):
+        trial = f'{cur} {w}' if cur else w
         if measure(trial) <= max_width:
             cur = trial
             continue
         if cur:
             lines.append(cur)
             cur = ''
-        if measure(u) <= max_width:
-            cur = u
-            continue
-        for w in u.split(' '):  # đơn vị quá rộng: tách lại theo từng từ
-            trial = f'{cur} {w}' if cur else w
-            if measure(trial) <= max_width:
-                cur = trial
-                continue
-            if cur:
-                lines.append(cur)
-                cur = ''
-            if measure(w) > max_width:
-                chunk = ''
-                for c in _clusters(w):
-                    if chunk and measure(chunk + c) > max_width:
-                        lines.append(chunk)
-                        chunk = c
-                    else:
-                        chunk += c
-                cur = chunk
-            else:
-                cur = w
+        if measure(w) > max_width:
+            chunk = ''
+            for c in _clusters(w):
+                if chunk and measure(chunk + c) > max_width:
+                    lines.append(chunk)
+                    chunk = c
+                else:
+                    chunk += c
+            cur = chunk
+        else:
+            cur = w
     if cur:
         lines.append(cur)
     return lines or [text]
+
+
+TITLE_LAYOUT = 'o-deu-v2'  # nhãn phiên bản bố cục tiêu đề (mọi ô cao bằng nhau); main_window hiện nhãn này trên thanh xem trước
 
 
 def _opt_num(opts, key, default, lo, hi):
@@ -661,67 +639,69 @@ def _opt_num(opts, key, default, lo, hi):
 
 
 def render_title_image(text, opts, out_path):
-    """Vẽ tiêu đề thành PNG trong suốt rộng CANVAS_W: chữ nằm trên một khối nền bo tròn liền mạch, nhiều dòng thì nền nối liền nhau.
+    """Vẽ tiêu đề thành PNG trong suốt rộng CANVAS_W: mỗi dòng chữ một ô nền bo góc ôm sát (kiểu TikTok Classic), nhiều dòng thì các ô nối liền nhau tạo hiệu ứng bậc thang.
     opts: size (px), color (chữ), halign (left/center/right) và các thông số nền:
       box_color   màu nền (mặc định #FFFFFF)
       box_opacity độ đục nền 0-100 (mặc định 100)
       box_radius  độ bo góc, % chiều cao một dòng, 0-50 (mặc định 30)
       box_pad_x   đệm ngang, % cỡ chữ (mặc định 50)
-      box_pad_y   đệm dọc phía trên dòng đầu / dưới dòng cuối, % cỡ chữ (mặc định 25)
+      box_pad_y   đệm dọc thêm vào MỖI dòng (mọi ô cao bằng nhau = bước dòng + đệm), % cỡ chữ (mặc định 25)
       line_height khoảng cách giữa các dòng (bước dòng), % cỡ chữ, 60-300 (mặc định 125 - sát như TikTok)
-      margin_x    lề hai bên, px (mặc định 120) - quyết định độ rộng tối đa của ô
+      safe_top    vùng an toàn phía trên, px (mặc định 240)
+      font_weight / font_width  độ đậm (100-900) / độ rộng (50-200) của font biến thiên
+      min_gap     hở dòng tối thiểu, % cỡ chữ (mặc định 12)
+      merge_step  bậc nhỏ hơn (x bán kính bo) thì gộp bằng nhau (mặc định 2)
+      text_dy     dịch chữ theo chiều dọc, px (mặc định 0)
+      supersample độ mịn khử răng cưa 1-8 (mặc định 4)
+      margin_x    lề hai bên, px (mặc định 180 -> ô rộng tối đa 720px, gần kiểu TikTok) - quyết định độ rộng tối đa của ô
     Trả về chiều cao ảnh (px)."""
     try:
         from PIL import Image, ImageDraw, ImageChops
     except ImportError:
         raise RuntimeError('Thiếu thư viện Pillow để vẽ tiêu đề. Cài bằng: pip install pillow')
-    SS = 4  # vẽ phóng to rồi thu nhỏ để viền bo tròn và chữ mượt (khử răng cưa)
+    SS = int(_opt_num(opts, 'supersample', 4, 1, 8))  # vẽ phóng to rồi thu nhỏ để viền bo tròn và chữ mượt (khử răng cưa)
     size = max(1, int(opts.get('size', 12)))
     text_rgb = _hex_rgb(opts.get('color', '#000000'), (0, 0, 0))
     box_rgb = _hex_rgb(opts.get('box_color', '#FFFFFF'), (255, 255, 255))
     opacity = _opt_num(opts, 'box_opacity', 100, 0, 100) / 100.0
     radius_pct = _opt_num(opts, 'box_radius', 30, 0, 50)
     halign = opts.get('halign', 'center')
-    margin_x = int(_opt_num(opts, 'margin_x', 120, 0, CANVAS_W // 2 - 50))
+    margin_x = int(_opt_num(opts, 'margin_x', 180, 0, CANVAS_W // 2 - 50))
 
     font_path = _find_title_font()
     if not font_path:
         raise RuntimeError('Không tìm thấy font tiêu đề. Hãy đặt TikTokText-Bold.otf (hoặc TikTokSans-Bold.ttf) vào thư mục fonts/')
-    # Xuống dòng theo độ rộng ô (ngắt dòng thông minh đã bỏ); cụm trong protected_phrases.txt vẫn không bị tách.
-    protected = load_protected_phrases()
     pad_x = int(round(size * _opt_num(opts, 'box_pad_x', 50, 0, 500) / 100.0)) * SS
     pad_y = int(round(size * _opt_num(opts, 'box_pad_y', 25, 0, 500) / 100.0)) * SS
-    tf = _TitleFont(size * SS, font_path)
+    tf = _TitleFont(size * SS, font_path, _opt_num(opts, 'font_weight', 700, 100, 900), _opt_num(opts, 'font_width', 100, 50, 200))
     avail_w = (CANVAS_W - 2 * margin_x) * SS - 2 * pad_x
-    lines = wrap_title(text, tf.width, avail_w, protected)
+    lines = wrap_title(text, tf.width, avail_w)
     font = tf.primary
 
     n = len(lines)
     line_pct = _opt_num(opts, 'line_height', 125, 60, 300)
-    pitch = max(2, int(round(size * SS * line_pct / 100.0)))      # bước dòng: ô các dòng nằm sát nhau, không còn khe hở
     cap_h = -font.getbbox('H', anchor='ls')[1]                     # chiều cao chữ hoa -> căn chữ giữa ô theo chiều dọc
-    base_off = (pitch + cap_h) / 2.0                               # baseline cách đỉnh ô một dòng
-    try:  # đỉnh chữ/dấu cao nhất của DÒNG ĐẦU so với baseline: chỉ chừa thêm chỗ khi dòng đầu thật sự có dấu chồng tiếng Việt, tiêu đề tiếng Anh thì ô cân đối
-        dia_top = -font.getbbox(lines[0] or 'H', anchor='ls')[1]
-    except Exception:
-        dia_top = -font.getbbox('ẤỨỬỖ', anchor='ls')[1]
-    # đệm phía TRÊN dòng đầu: thu nhỏ còn 60% đệm dọc -> mép trên của ô hạ xuống sát chữ hơn (mép dưới/giữa các dòng giữ nguyên)
-    pad_top = int(round(pad_y * 0.6))
-    pad_first = max(pad_top, int(math.ceil(dia_top - base_off)))   # dòng đầu: vẫn chừa chỗ cho dấu không lòi ra ngoài ô
-    # Nới đáy ô dòng 1 (chỗ nối 2 dòng) sao cho chữ thường (o, w...) của dòng 1 có khoảng trắng phía TRÊN (từ mép trên ô tới đỉnh chữ)
-    # bằng khoảng trắng phía DƯỚI (từ chân chữ tới mép đáy ô dòng 1)
-    xh = -font.getbbox('ow', anchor='ls')[1]                       # chiều cao chữ thường
-    pad_mid = max(0, int(round(pad_first + cap_h - xh)))
-    ys, hs, y_cur = [], [], 0
-    for i in range(n):
-        h = pitch + (pad_first if i == 0 else 0) + (pad_y if i == n - 1 else 0)
-        if i == 0 and n > 1:
-            h += pad_mid                                           # nới phần ô trắng phía dưới dòng 1 (chỗ nối 2 dòng)
-        ys.append(y_cur)
-        hs.append(h)
-        y_cur += h
-    total_h = y_cur
-    r = min(int(pitch * radius_pct / 100.0), min(hs) // 2)  # bán kính bo góc
+    desc_h = max(0, font.getbbox('gjpqy', anchor='ls')[3])         # độ sâu phần chân chữ (g, j, p, q, y) dưới baseline
+    # bước dòng = line_height% cỡ chữ, nhưng không nhỏ hơn (chiều cao chữ hoa + chân chữ + một chút hở)
+    pitch = max(2, int(round(size * SS * line_pct / 100.0)), cap_h + desc_h + int(round(size * SS * _opt_num(opts, 'min_gap', 12, 0, 100) / 100.0)))
+    # Đỉnh chữ/dấu cao nhất trong MỌI dòng so với baseline (dấu chồng tiếng Việt) -> ô đủ cao để dấu không lòi ra ngoài
+    dia_top = cap_h
+    for ln in lines:
+        try:
+            dia_top = max(dia_top, -font.getbbox(ln or 'H', anchor='ls')[1])
+        except Exception:
+            dia_top = max(dia_top, -font.getbbox('ẤỨỬỖ', anchor='ls')[1])
+    # MỌI dòng dùng CHUNG một chiều cao ô box_h = bước dòng + đệm dọc (box_pad_y) -> các ô luôn bằng nhau (dòng đầu/giữa/cuối như nhau).
+    # Chữ nằm giữa ô theo chiều dọc (căn theo chiều cao chữ hoa); box_h không nhỏ hơn mức cần để chứa dấu phía trên và chân chữ phía dưới.
+    box_h = max(pitch + pad_y, int(math.ceil(2 * dia_top - cap_h)), cap_h + 2 * desc_h)
+    box_h = int(math.ceil(box_h / SS)) * SS                        # làm tròn lên bội của SS -> sau khi thu nhỏ mỗi ô cao đúng số nguyên px, không lệch 1px
+    base_off = (box_h + cap_h) / 2.0                               # baseline cách đỉnh ô một dòng
+    ys = [i * box_h for i in range(n)]
+    hs = [box_h] * n
+    total_h = n * box_h
+    text_dy = _opt_num(opts, 'text_dy', 0, -200, 200) * SS            # dịch chữ lên/xuống trong ô (px)
+    ys_text = [y + text_dy for y in ys]
+    r = min(int(pitch * radius_pct / 100.0), box_h // 2)           # bán kính bo góc
 
     # Mép trái/phải của ô từng dòng (đơn vị px đã phóng to)
     x0, x1 = [], []
@@ -735,41 +715,88 @@ def render_title_image(text, opts, out_path):
             bx = (CANVAS_W * SS - bw) / 2
         x0.append(int(round(bx)))
         x1.append(int(round(bx + bw)))
-    # Hai dòng lệch nhau quá ít (< 2 lần bán kính) thì gộp cho bằng nhau để viền không bị răng cưa
+    # Hai dòng lệch nhau chưa đủ chỗ cho hai cung bo đầy đủ (bậc < MERGE_STEP_R x bán kính bo, mặc định 2r) thì cho chung độ rộng
+    # luôn (dòng ngắn nới ra bằng dòng dài) -> không còn bậc nhỏ lắt nhắt; bậc từ 2r trở lên mới giữ thành bậc thang.
+    MERGE_STEP_R = _opt_num(opts, 'merge_step', 2.0, 0, 6)
+    min_step = max(4 * SS, int(round(r * MERGE_STEP_R)))
     for _ in range(n):
         for i in range(n - 1):
-            if 0 < abs(x0[i] - x0[i + 1]) < 2 * r:
+            if 0 < abs(x0[i] - x0[i + 1]) < min_step:
                 x0[i] = x0[i + 1] = min(x0[i], x0[i + 1])
-            if 0 < abs(x1[i] - x1[i + 1]) < 2 * r:
+            if 0 < abs(x1[i] - x1[i + 1]) < min_step:
                 x1[i] = x1[i + 1] = max(x1[i], x1[i + 1])
 
-    # Vẽ hình dạng nền vào mặt nạ (L) rồi mới tô màu/độ đục -> nền trong suốt một phần vẫn đều màu, không bị chồng lớp
-    mask = Image.new('L', (CANVAS_W * SS, total_h), 0)
-    dm = ImageDraw.Draw(mask)
-    # 1) Các ô nối liền nhau, chỉ bo những góc lộ ra ngoài (góc nằm giữa hai dòng thì để vuông)
-    for i in range(n):
-        y = ys[i]
-        corners = (i == 0 or x0[i] < x0[i - 1],            # trên-trái
-                   i == 0 or x1[i] > x1[i - 1],            # trên-phải
-                   i == n - 1 or x1[i] > x1[i + 1],        # dưới-phải
-                   i == n - 1 or x0[i] < x0[i + 1])        # dưới-trái
-        dm.rounded_rectangle([x0[i], y, x1[i], y + hs[i]], radius=r, fill=255, corners=corners)
-    # 2) Góc lõm bo tròn tại chỗ hai dòng có độ rộng khác nhau
-    if r >= 1:
+    # ---- Hình nền: tính đường viền trái/phải theo từng hàng pixel rồi tô kín giữa hai đường viền ----
+    # Mỗi dòng là một ô chữ nhật; hai ô liền kề lệch nhau một "bậc" thì viền nối bằng đường cong chữ S gồm hai cung bán kính r
+    # (cung lồi của ô rộng hơn + cung lõm ở ô hẹp hơn). Bậc nhỏ hơn 2r thì mỗi cung chỉ đi một phần tư vòng ->
+    # vẫn mượt, cùng bán kính r với các góc ngoài, không còn "cục u" bán kính bé xíu.
+    r = max(0, min(r, (min(x1[i] - x0[i] for i in range(n))) // 2))
+
+    def _edge_points(L):
+        """L[i] = vị trí viền (đã quy về BÊN TRÁI) của ô dòng i. Trả về các điểm (y, x) mô tả viền từ trên xuống."""
+        ptsy, ptsx = [], []
+
+        def add(y, x):
+            ptsy.append(float(y))
+            ptsx.append(float(x))
+
+        K = 24
+        # góc trên của ô đầu (cung lồi)
+        for k in range(K + 1):
+            y = r * k / K
+            add(y, L[0] + r - math.sqrt(max(0.0, r * r - (r - y) ** 2)))
         for i in range(n - 1):
             yj = ys[i + 1]
-            for side in ('L', 'R'):
-                a_, b_ = (x0[i], x0[i + 1]) if side == 'L' else (x1[i], x1[i + 1])
-                if a_ == b_:
-                    continue
-                upper_narrow = (a_ > b_) if side == 'L' else (a_ < b_)  # dòng hẹp hơn là dòng có mép nằm sâu vào trong
-                e = a_ if upper_narrow else b_
-                px, cx = (e, r) if side == 'R' else (e - r, 0)
-                py, cy = (yj - r, 0) if upper_narrow else (yj, r)
-                patch = Image.new('L', (r, r), 255)
-                ImageDraw.Draw(patch).ellipse([cx - r, cy - r, cx + r, cy + r], fill=0)
-                region = mask.crop((px, py, px + r, py + r))
-                mask.paste(ImageChops.lighter(region, patch), (px, py))
+            sgn = L[i + 1] - L[i]
+            d = abs(sgn)
+            if d == 0:
+                add(yj, L[i])
+                continue
+            R = r
+            if R <= 0:
+                add(yj, L[i])
+                add(yj, L[i + 1])
+                continue
+            theta = math.acos(1.0 - min(d, 2.0 * R) / (2.0 * R))
+            dirn = 1.0 if sgn > 0 else -1.0                   # +1: ô dưới thụt vào (sang phải), -1: ô dưới rộng ra (sang trái)
+            h = R * math.sin(theta)
+            # cung 1: rời viền ô trên, rẽ về hướng dirn
+            for k in range(K + 1):
+                phi = theta * k / K
+                add(yj - h + R * math.sin(phi), L[i] + dirn * R * (1.0 - math.cos(phi)))
+            # đoạn nằm ngang (chỉ có khi bậc >= 2r)
+            x_end1 = L[i] + dirn * R * (1.0 - math.cos(theta))
+            x_start2 = L[i + 1] - dirn * R * (1.0 - math.cos(theta))
+            add(yj, x_end1)
+            add(yj, x_start2)
+            # cung 2: vào viền ô dưới
+            for k in range(K + 1):
+                phi = theta * (K - k) / K
+                add(yj + h - R * math.sin(phi), L[i + 1] - dirn * R * (1.0 - math.cos(phi)))
+        # góc dưới của ô cuối (cung lồi)
+        yb = ys[-1] + hs[-1]
+        for k in range(K + 1):
+            y = yb - r + r * k / K
+            add(y, L[-1] + r - math.sqrt(max(0.0, r * r - (y - (yb - r)) ** 2)))
+        order = sorted(range(len(ptsy)), key=lambda t: (ptsy[t], t))
+        return [ptsy[t] for t in order], [ptsx[t] for t in order]
+
+    rows_y = np.arange(total_h, dtype=np.float64) + 0.5
+    ly, lx = _edge_points([float(v) for v in x0])
+    ry, rx = _edge_points([-float(v) for v in x1])
+    xl = np.interp(rows_y, ly, lx)
+    xr = -np.interp(rows_y, ry, rx)
+    W_ss = CANVAS_W * SS
+    cols = np.arange(W_ss, dtype=np.float32)
+    mask_arr = np.zeros((total_h, W_ss), dtype=np.uint8)
+    CH = 256
+    for y0_ in range(0, total_h, CH):
+        y1_ = min(total_h, y0_ + CH)
+        lo = xl[y0_:y1_, None].astype(np.float32)
+        hi = xr[y0_:y1_, None].astype(np.float32)
+        cov = np.clip(np.minimum(cols[None, :] + 1.0, hi) - np.maximum(cols[None, :], lo), 0.0, 1.0)
+        mask_arr[y0_:y1_] = (cov * 255.0 + 0.5).astype(np.uint8)
+    mask = Image.fromarray(mask_arr, 'L')
     if opacity < 1.0:
         mask = mask.point(lambda v: int(v * opacity))
     img = Image.new('RGBA', (CANVAS_W * SS, total_h), box_rgb + (0,))
@@ -780,7 +807,7 @@ def render_title_image(text, opts, out_path):
         lw = tf.width(ln)
         tx = x0[i] + pad_x if halign == 'left' else (x1[i] - pad_x - lw if halign == 'right'
                                                       else (x0[i] + x1[i] - lw) / 2)
-        tf.draw(img, draw, tx, ys[i] + (pad_first if i == 0 else 0) + base_off, ln, text_rgb + (255,))
+        tf.draw(img, draw, tx, ys_text[i] + base_off, ln, text_rgb + (255,))
     out_h = max(2, round(total_h / SS))
     img = img.resize((CANVAS_W, out_h), Image.LANCZOS)
     img.save(out_path, 'PNG')
@@ -792,7 +819,7 @@ def render_title_image(text, opts, out_path):
 # ---------------------------------------------------------------------------------------------
 def render_title_preview(opts, text, resolution_preset='1920x1080'):
     """Tạo ảnh xem trước: canvas CANVAS_W x CANVAS_H nền đen + tiêu đề `text`, đặt ở đúng vị trí như khi render
-    video thật (cách mép trên video `gap` px, hoặc cách mép khung 260px nếu video lấp kín khung 9:16).
+    video thật (đỉnh ô chữ nằm dưới vùng an toàn phía trên của TikTok, không phụ thuộc vị trí video).
     Trả về PIL.Image RGB. Lưu ý: vị trí dựa vào mục Resolution; 'Original' coi video nguồn là 1920x1080."""
     from PIL import Image
     text = sanitize_title(text, _find_title_font())
@@ -806,11 +833,9 @@ def render_title_preview(opts, text, resolution_preset='1920x1080'):
     try:
         if py == 0:
             title_h = render_title_image(text, dict(opts, halign='center'), tmp_png)
-            title_y = min(TITLE_TOP_916, max(0, CANVAS_H - title_h))
         else:
             title_h = render_title_image(text, opts, tmp_png)
-            gap = max(0, int(opts.get('gap', 50)))
-            title_y = max(py - gap, title_h) - title_h
+        title_y = compute_title_y(title_h, opts.get('top_offset', 0), opts.get('safe_top'))
         title_img = Image.open(tmp_png).convert('RGBA')
         title_img.load()
     finally:
@@ -860,7 +885,7 @@ def render_segment(video_path, start_time, segment_duration, output_path, speed=
     with instant cancellation support.
     frame_opts: nếu có -> cắt video theo tỉ lệ của resolution_preset (vd 960x720 = 4:3), rồi đặt vào
                 khung 9:16 (1080x1920) nền đen, video ở giữa, tiêu đề nằm trong vùng đen ngay phía trên video.
-                Keys: text, size, color, halign, gap.
+                Keys: text, size, color, halign, top_offset (px thêm dưới vùng an toàn TikTok).
     is_cancelled: callable trả về True khi người dùng bấm dừng.
     volume_db: chỉnh âm lượng theo dB (dương = tăng, âm = giảm, 0 = giữ nguyên).
     Ném RuntimeError nếu FFmpeg thất bại (trừ khi bị dừng)."""
@@ -902,11 +927,9 @@ def render_segment(video_path, start_time, segment_duration, output_path, speed=
                     # Video lấp kín khung 9:16 (không còn vùng đen phía trên): căn giữa, cách lề trên 260px
                     title_opts = dict(frame_opts, halign='center')
                     title_h = render_title_image(text, title_opts, title_png)
-                    title_y = min(TITLE_TOP_916, max(0, CANVAS_H - title_h))
                 else:
                     title_h = render_title_image(text, frame_opts, title_png)
-                    gap = max(0, int(frame_opts.get('gap', 50)))
-                    title_y = max(py - gap, title_h) - title_h  # đáy ô chữ cách mép trên video `gap` px
+                title_y = compute_title_y(title_h, frame_opts.get('top_offset', 0), frame_opts.get('safe_top'))  # đỉnh ô chữ nằm dưới vùng an toàn TikTok
         elif resolution_preset == '960x720':
             vf_filters.append('scale=-1:720,crop=960:720')
         elif '1080x1920' in resolution_preset:
