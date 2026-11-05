@@ -1,0 +1,9 @@
+# Media and generated files
+*.mp4
+*.spec
+*.exe
+*.pyc
+
+# Build output folders
+build/
+dist/
