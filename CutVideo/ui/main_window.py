@@ -52,13 +52,13 @@ QPushButton[tab="true"]:checked { background-color: #242938; color: #00d2ff; bor
 """
 # Thông số tiêu đề gán cứng (theo settings.json), không hiển thị trên giao diện
 TITLE_FIXED = {'line_height': 100, 'font_weight': 700, 'font_width': 100, 'min_gap': 0, 'merge_step': 2.0, 'text_dy': 0, 'supersample': 4}
-NAME_STYLES = (('Pt. 1, Pt. 2, ...', 'pt'), ('-1, -2, ...', 'dash'), ('(1), (2), ...', 'paren'), ('1편, 2편, ...', 'pyeon'))
+NAME_STYLES = (('Pt. 1, Pt. 2, ...', 'pt'), ('-1, -2, ...', 'dash'), ('Tên(1), Tên(2), ... (liền, không cách)', 'paren'), ('1편, 2편, ...', 'pyeon'))
 def format_segment_name(base_name, index, style):
     """Tên file (không đuôi) của đoạn thứ `index` (đếm từ 1) theo kiểu đã chọn."""
     if style == 'dash':
         return f'{base_name}-{index}'
     if style == 'paren':
-        return f'{base_name} ({index})'
+        return f'{base_name}({index})'
     if style == 'pyeon':
         return f'{base_name} {index}편'
     return f'{base_name} Pt. {index}'
