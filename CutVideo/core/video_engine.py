@@ -640,7 +640,7 @@ def wrap_title(text, measure, max_width):
     return lines or [text]
 
 
-TITLE_LAYOUT = 'o-deu-v3'  # nhãn phiên bản bố cục tiêu đề (mọi ô cao bằng nhau); main_window hiện nhãn này trên thanh xem trước
+TITLE_LAYOUT = 'o-deu-v9'  # nhãn phiên bản bố cục tiêu đề (đệm trên/dưới + trái/phải mỗi dòng); main_window hiện nhãn này trên thanh xem trước
 
 
 def _opt_num(opts, key, default, lo, hi):
@@ -651,20 +651,62 @@ def _opt_num(opts, key, default, lo, hi):
     return min(max(v, lo), hi)
 
 
+_PROFILE_INF = 1e7
+
+
+def _round_profile(f, r):
+    """Bo tròn một đường viền dạng hàm f[y] (vị trí x của mép TRÁI ở từng hàng; _PROFILE_INF = hàng trống).
+    Vùng ở bên phải mép được "mở" rồi "đóng" bằng đĩa bán kính r (hình thái học, tính 1 chiều theo từng hàng nên rất nhanh):
+      mở  = co (max f[y+k] + s_k) rồi giãn (min e[y+k] - s_k)  -> bo tròn các góc lồi bằng cung bán kính r
+      đóng = giãn rồi co                                          -> lấp và bo mềm các góc lõm bằng cung bán kính r
+    với s_k = sqrt(r^2 - k^2), |k| <= r. Mép phải dùng cách này cho -x."""
+    if r <= 0:
+        return f
+    n = len(f)
+    ks = np.arange(-r, r + 1)
+    s = np.sqrt(np.maximum(0.0, float(r) * r - ks.astype(np.float64) ** 2))
+
+    def morph(a, erode):
+        P = np.full(n + 2 * r, _PROFILE_INF)
+        P[r:r + n] = a
+        out = None
+        for idx in range(len(ks)):
+            k = int(ks[idx])
+            seg = P[r + k:r + k + n] + (s[idx] if erode else -s[idx])
+            if out is None:
+                out = seg
+            else:
+                out = np.maximum(out, seg) if erode else np.minimum(out, seg)
+        return out
+
+    o = morph(morph(f, True), False)       # mở
+    return morph(morph(o, False), True)    # đóng
+
+
 def render_title_image(text, opts, out_path):
     """Vẽ tiêu đề thành PNG trong suốt rộng CANVAS_W: mỗi dòng chữ một ô nền bo góc ôm sát (kiểu TikTok Classic), nhiều dòng thì các ô nối liền nhau tạo hiệu ứng bậc thang.
     opts: size (px), color (chữ), halign (left/center/right) và các thông số nền:
       box_color   màu nền (mặc định #FFFFFF)
       box_opacity độ đục nền 0-100 (mặc định 100)
       box_radius  độ bo góc, % chiều cao một dòng, 0-50 (mặc định 30)
-      box_pad_x   đệm ngang, % cỡ chữ (mặc định 50)
-      box_pad_y   đệm dọc thêm vào MỖI dòng (mọi ô cao bằng nhau = bước dòng + đệm), % cỡ chữ (mặc định 25)
-      line_height khoảng cách giữa các dòng (bước dòng), % cỡ chữ, 60-300 (mặc định 125 - sát như TikTok)
+      line_pad_y  đệm TRÊN/DƯỚI của TỪNG dòng chữ, % cỡ chữ, -50..300 (mặc định 38). Ô nền của mỗi dòng cao = cỡ chữ + 2 x đệm này.
+                  Ô nền luôn nằm đối xứng quanh TÂM dòng chữ (đường kẻ ngang giữa ô): tăng/giảm đệm chỉ kéo mép trên và mép dưới của ô ra/vào,
+                  tâm ô và vị trí chữ KHÔNG đổi, khoảng cách giữa các dòng chữ cũng KHÔNG đổi.
+      line_spacing khoảng cách giữa 2 dòng chữ (baseline -> baseline), % cỡ chữ, 20..600 (mặc định 176 = ô cao 176% chạm nhau như cũ).
+                  Độc lập hoàn toàn với chiều cao ô: khoảng cách này lớn hơn chiều cao ô thì mỗi dòng một ô riêng (có khe hở),
+                  bằng thì các ô chạm nhau thành bậc thang, NHỎ hơn thì các ô chồng lên nhau; phần chồng vẫn được hợp nhất thành một khối
+                  và bo góc (cả góc lồi lẫn góc lõm) đúng bán kính nên đường viền luôn tự nhiên.
+      line_gap    (CŨ, chỉ dùng khi không có line_spacing) khoảng hở giữa các ô, % cỡ chữ: khoảng cách dòng = chiều cao ô + line_gap.
+      line_pad_x  đệm TRÁI/PHẢI mỗi dòng chữ, % cỡ chữ, 0..500 (mặc định 55). Nền của mỗi dòng rộng = bề rộng chữ + 2 x đệm này.
+                  CHỈ đổi bề rộng nền: không đổi chỗ xuống dòng, không dịch chữ.
+      wrap_pad    đệm ngang THAM CHIẾU dùng để tính chỗ xuống dòng và vị trí chữ khi căn trái/phải, % cỡ chữ (mặc định 55) - cố định, không phụ thuộc line_pad_x
       font_weight / font_width  độ đậm (100-900) / độ rộng (50-200) của font biến thiên
       min_gap     hở dòng tối thiểu, % cỡ chữ (mặc định 12)
       merge_step  bậc nhỏ hơn (x bán kính bo) thì gộp bằng nhau (mặc định 2)
       text_dy     dịch chữ theo chiều dọc, px (mặc định 0)
       supersample độ mịn khử răng cưa 1-8 (mặc định 4)
+      title_scale phóng to/thu nhỏ CẢ tiêu đề (chữ + nền), % (10-400, mặc định 100). Việc xuống dòng giữ nguyên, chỉ co giãn hình;
+                  co giãn quanh điểm neo theo căn ngang (căn trái: mép trái ô, căn phải: mép phải ô, căn giữa: tâm ô).
       margin_x    lề hai bên, px (mặc định 180 -> ô rộng tối đa 720px, gần kiểu TikTok) - quyết định độ rộng tối đa của ô.
                   Nếu tiêu đề thành hơn TITLE_MAX_LINES (3) dòng thì lề được giảm dần từng bước TITLE_MARGIN_STEP px
                   (không thấp hơn TITLE_MARGIN_MIN = 120px) và dừng ngay khi còn 3 dòng.
@@ -685,12 +727,12 @@ def render_title_image(text, opts, out_path):
     font_path = _find_title_font()
     if not font_path:
         raise RuntimeError('Không tìm thấy font tiêu đề. Hãy đặt TikTokText-Bold.otf (hoặc TikTokSans-Bold.ttf) vào thư mục fonts/')
-    pad_x = int(round(size * _opt_num(opts, 'box_pad_x', 50, 0, 500) / 100.0)) * SS
-    pad_y = int(round(size * _opt_num(opts, 'box_pad_y', 25, 0, 500) / 100.0)) * SS
+    pad_x = int(round(size * _opt_num(opts, 'line_pad_x', 55, 0, 500) / 100.0)) * SS   # đệm trái/phải mỗi dòng
+    ref_pad = int(round(size * _opt_num(opts, 'wrap_pad', 55, 0, 500) / 100.0)) * SS   # đệm tham chiếu: quyết định xuống dòng + vị trí chữ, độc lập với line_pad_x
     tf = _TitleFont(size * SS, font_path, _opt_num(opts, 'font_weight', 700, 100, 900), _opt_num(opts, 'font_width', 100, 50, 200))
 
     def _wrap_with_margin(m):
-        return wrap_title(text, tf.width, (CANVAS_W - 2 * m) * SS - 2 * pad_x)
+        return wrap_title(text, tf.width, (CANVAS_W - 2 * m) * SS - 2 * ref_pad)
 
     lines = _wrap_with_margin(margin_x)
     # Tiêu đề dài quá 3 dòng: nới ô rộng ra từng bước (giảm lề), còn 3 dòng là dừng - không nhảy thẳng xuống lề nhỏ nhất.
@@ -701,38 +743,32 @@ def render_title_image(text, opts, out_path):
     font = tf.primary
 
     n = len(lines)
-    line_pct = _opt_num(opts, 'line_height', 125, 60, 300)
-    cap_h = -font.getbbox('H', anchor='ls')[1]                     # chiều cao chữ hoa -> căn chữ giữa ô theo chiều dọc
-    desc_h = max(0, font.getbbox('gjpqy', anchor='ls')[3])         # độ sâu phần chân chữ (g, j, p, q, y) dưới baseline
-    # bước dòng = line_height% cỡ chữ, nhưng không nhỏ hơn (chiều cao chữ hoa + chân chữ + một chút hở)
-    pitch = max(2, int(round(size * SS * line_pct / 100.0)), cap_h + desc_h + int(round(size * SS * _opt_num(opts, 'min_gap', 12, 0, 100) / 100.0)))
-    # Đỉnh chữ/dấu cao nhất trong MỌI dòng so với baseline (dấu chồng tiếng Việt) -> ô đủ cao để dấu không lòi ra ngoài
-    dia_top = cap_h
-    for ln in lines:
-        try:
-            dia_top = max(dia_top, -font.getbbox(ln or 'H', anchor='ls')[1])
-        except Exception:
-            dia_top = max(dia_top, -font.getbbox('ẤỨỬỖ', anchor='ls')[1])
-    # MỌI dòng dùng CHUNG một chiều cao ô box_h = bước dòng + đệm dọc (box_pad_y) -> các ô luôn bằng nhau (dòng đầu/giữa/cuối như nhau).
-    # Chữ nằm giữa ô theo chiều dọc (căn theo chiều cao chữ hoa); box_h không nhỏ hơn mức cần để chứa dấu phía trên và chân chữ phía dưới.
-    box_h = max(pitch + pad_y, int(math.ceil(2 * dia_top - cap_h)), cap_h + 2 * desc_h)
-    box_h = int(math.ceil(box_h / SS)) * SS                        # làm tròn lên bội của SS -> sau khi thu nhỏ mỗi ô cao đúng số nguyên px, không lệch 1px
-    base_off = (box_h + cap_h) / 2.0                               # baseline cách đỉnh ô một dòng
-    ys = [i * box_h for i in range(n)]
-    hs = [box_h] * n
-    total_h = n * box_h
+    cap_h = -font.getbbox('H', anchor='ls')[1]                     # chiều cao chữ hoa -> căn chữ giữa dòng theo chiều dọc
+    # (1) CHIỀU CAO Ô: h = cỡ chữ + 2 x line_pad_y% cỡ chữ. Ô luôn đối xứng quanh TÂM dòng -> đổi h chỉ kéo mép trên/dưới, tâm đứng yên.
+    pad_y = int(round(size * _opt_num(opts, 'line_pad_y', 38, -50, 300) / 100.0)) * SS
+    h_box = max(4 * SS, size * SS + 2 * pad_y)
+    # (2) KHOẢNG CÁCH DÒNG (baseline -> baseline): độc lập với chiều cao ô.
+    if 'line_spacing' in opts:
+        pitch = int(round(size * _opt_num(opts, 'line_spacing', 176, 20, 600) / 100.0)) * SS
+    else:                                                          # cấu hình cũ: khoảng cách dòng = chiều cao ô + hở
+        pitch = h_box + int(round(size * _opt_num(opts, 'line_gap', 0, -50, 400) / 100.0)) * SS
+    pitch = max(2 * SS, pitch)
+    joined = pitch <= h_box                                        # các ô chạm/chồng nhau -> hợp nhất thành một khối
+    total_h = int(math.ceil((n - 1) * pitch + h_box))
+    cys = [h_box / 2.0 + i * pitch for i in range(n)]              # tâm (đường kẻ ngang giữa) của ô dòng i - KHÔNG phụ thuộc h_box
     text_dy = _opt_num(opts, 'text_dy', 0, -200, 200) * SS            # dịch chữ lên/xuống trong ô (px)
-    ys_text = [y + text_dy for y in ys]
-    r = min(int(pitch * radius_pct / 100.0), box_h // 2)           # bán kính bo góc
+    baselines = [c + cap_h / 2.0 + text_dy for c in cys]           # tâm chữ hoa trùng tâm ô
+    groups = [list(range(n))] if joined else [[i] for i in range(n)]
+    r = int(h_box * radius_pct / 100.0)                            # bán kính bo góc (% chiều cao ô)
 
     # Mép trái/phải của ô từng dòng (đơn vị px đã phóng to)
     x0, x1 = [], []
     for ln in lines:
         bw = tf.width(ln) + 2 * pad_x
         if halign == 'left':
-            bx = margin_x * SS
+            bx = margin_x * SS + ref_pad - pad_x                      # mép chữ cố định, chỉ nền nở ra/thu vào
         elif halign == 'right':
-            bx = (CANVAS_W - margin_x) * SS - bw
+            bx = (CANVAS_W - margin_x) * SS - ref_pad + pad_x - bw
         else:
             bx = (CANVAS_W * SS - bw) / 2
         x0.append(int(round(bx)))
@@ -741,83 +777,49 @@ def render_title_image(text, opts, out_path):
     # luôn (dòng ngắn nới ra bằng dòng dài) -> không còn bậc nhỏ lắt nhắt; bậc từ 2r trở lên mới giữ thành bậc thang.
     MERGE_STEP_R = _opt_num(opts, 'merge_step', 2.0, 0, 6)
     min_step = max(4 * SS, int(round(r * MERGE_STEP_R)))
-    for _ in range(n):
+    for _ in range(n if joined else 0):
         for i in range(n - 1):
             if 0 < abs(x0[i] - x0[i + 1]) < min_step:
                 x0[i] = x0[i + 1] = min(x0[i], x0[i + 1])
             if 0 < abs(x1[i] - x1[i + 1]) < min_step:
                 x1[i] = x1[i + 1] = max(x1[i], x1[i + 1])
+    r = max(0, min(r, h_box // 2, min(x1[i] - x0[i] for i in range(n)) // 2))
 
-    # ---- Hình nền: tính đường viền trái/phải theo từng hàng pixel rồi tô kín giữa hai đường viền ----
-    # Mỗi dòng là một ô chữ nhật; hai ô liền kề lệch nhau một "bậc" thì viền nối bằng đường cong chữ S gồm hai cung bán kính r
-    # (cung lồi của ô rộng hơn + cung lõm ở ô hẹp hơn). Bậc nhỏ hơn 2r thì mỗi cung chỉ đi một phần tư vòng ->
-    # vẫn mượt, cùng bán kính r với các góc ngoài, không còn "cục u" bán kính bé xíu.
-    r = max(0, min(r, (min(x1[i] - x0[i] for i in range(n))) // 2))
-
-    def _edge_points(L):
-        """L[i] = vị trí viền (đã quy về BÊN TRÁI) của ô dòng i. Trả về các điểm (y, x) mô tả viền từ trên xuống."""
-        ptsy, ptsx = [], []
-
-        def add(y, x):
-            ptsy.append(float(y))
-            ptsx.append(float(x))
-
-        K = 24
-        # góc trên của ô đầu (cung lồi)
-        for k in range(K + 1):
-            y = r * k / K
-            add(y, L[0] + r - math.sqrt(max(0.0, r * r - (r - y) ** 2)))
-        for i in range(n - 1):
-            yj = ys[i + 1]
-            sgn = L[i + 1] - L[i]
-            d = abs(sgn)
-            if d == 0:
-                add(yj, L[i])
-                continue
-            R = r
-            if R <= 0:
-                add(yj, L[i])
-                add(yj, L[i + 1])
-                continue
-            theta = math.acos(1.0 - min(d, 2.0 * R) / (2.0 * R))
-            dirn = 1.0 if sgn > 0 else -1.0                   # +1: ô dưới thụt vào (sang phải), -1: ô dưới rộng ra (sang trái)
-            h = R * math.sin(theta)
-            # cung 1: rời viền ô trên, rẽ về hướng dirn
-            for k in range(K + 1):
-                phi = theta * k / K
-                add(yj - h + R * math.sin(phi), L[i] + dirn * R * (1.0 - math.cos(phi)))
-            # đoạn nằm ngang (chỉ có khi bậc >= 2r)
-            x_end1 = L[i] + dirn * R * (1.0 - math.cos(theta))
-            x_start2 = L[i + 1] - dirn * R * (1.0 - math.cos(theta))
-            add(yj, x_end1)
-            add(yj, x_start2)
-            # cung 2: vào viền ô dưới
-            for k in range(K + 1):
-                phi = theta * (K - k) / K
-                add(yj + h - R * math.sin(phi), L[i + 1] - dirn * R * (1.0 - math.cos(phi)))
-        # góc dưới của ô cuối (cung lồi)
-        yb = ys[-1] + hs[-1]
-        for k in range(K + 1):
-            y = yb - r + r * k / K
-            add(y, L[-1] + r - math.sqrt(max(0.0, r * r - (y - (yb - r)) ** 2)))
-        order = sorted(range(len(ptsy)), key=lambda t: (ptsy[t], t))
-        return [ptsy[t] for t in order], [ptsx[t] for t in order]
-
-    rows_y = np.arange(total_h, dtype=np.float64) + 0.5
-    ly, lx = _edge_points([float(v) for v in x0])
-    ry, rx = _edge_points([-float(v) for v in x1])
-    xl = np.interp(rows_y, ly, lx)
-    xr = -np.interp(rows_y, ry, rx)
+    # ---- Hình nền ----
+    # Mỗi dòng là một hình chữ nhật [x0,x1] x [tâm - h/2, tâm + h/2]. Với mỗi hàng pixel, mép trái = min x0 và mép phải = max x1 của các ô
+    # đang phủ hàng đó (ô chồng nhau thì tự hợp nhất). Sau đó mỗi mép được bo bằng phép "mở rồi đóng" hình thái học với đĩa bán kính r
+    # (_round_profile): "mở" bo tròn mọi góc lồi, "đóng" bo mềm mọi góc lõm (chỗ hai ô nối nhau) -> đường viền luôn tự nhiên dù các ô
+    # chạm nhau, chồng một phần hay chồng gần hết. Mỗi khối ô liền nhau xử lý riêng nên các ô có khe hở không bị dính vào nhau.
     W_ss = CANVAS_W * SS
     cols = np.arange(W_ss, dtype=np.float32)
     mask_arr = np.zeros((total_h, W_ss), dtype=np.uint8)
     CH = 256
-    for y0_ in range(0, total_h, CH):
-        y1_ = min(total_h, y0_ + CH)
-        lo = xl[y0_:y1_, None].astype(np.float32)
-        hi = xr[y0_:y1_, None].astype(np.float32)
-        cov = np.clip(np.minimum(cols[None, :] + 1.0, hi) - np.maximum(cols[None, :], lo), 0.0, 1.0)
-        mask_arr[y0_:y1_] = (cov * 255.0 + 0.5).astype(np.uint8)
+    for g in groups:
+        top = cys[g[0]] - h_box / 2.0
+        bot = cys[g[-1]] + h_box / 2.0
+        gy0, gy1 = max(0, int(math.floor(top))), min(total_h, int(math.ceil(bot)))
+        if gy1 <= gy0:
+            continue
+        m = r + 2                                                  # đệm thêm trên/dưới để phép "đóng" không cắt mất mép khối
+        rows = np.arange(gy0 - m, gy1 + m, dtype=np.float64) + 0.5  # tâm các hàng pixel
+        xl = np.full(len(rows), _PROFILE_INF)
+        xr = np.full(len(rows), -_PROFILE_INF)
+        for i in g:
+            sel = (rows >= cys[i] - h_box / 2.0) & (rows < cys[i] + h_box / 2.0)
+            xl[sel] = np.minimum(xl[sel], x0[i])
+            xr[sel] = np.maximum(xr[sel], x1[i])
+        xl = _round_profile(xl, r)
+        xr = -_round_profile(-xr, r)
+        xl, xr = xl[m:m + gy1 - gy0], xr[m:m + gy1 - gy0]
+        ok = (xl < _PROFILE_INF / 10) & (xr > -_PROFILE_INF / 10) & (xr > xl)
+        xl = np.where(ok, xl, 0.0)
+        xr = np.where(ok, xr, 0.0)
+        for c0 in range(0, gy1 - gy0, CH):
+            c1 = min(gy1 - gy0, c0 + CH)
+            lo = xl[c0:c1, None].astype(np.float32)
+            hi = xr[c0:c1, None].astype(np.float32)
+            cov = np.clip(np.minimum(cols[None, :] + 1.0, hi) - np.maximum(cols[None, :], lo), 0.0, 1.0)
+            mask_arr[gy0 + c0:gy0 + c1] = (cov * 255.0 + 0.5).astype(np.uint8)
     mask = Image.fromarray(mask_arr, 'L')
     if opacity < 1.0:
         mask = mask.point(lambda v: int(v * opacity))
@@ -829,11 +831,28 @@ def render_title_image(text, opts, out_path):
         lw = tf.width(ln)
         tx = x0[i] + pad_x if halign == 'left' else (x1[i] - pad_x - lw if halign == 'right'
                                                       else (x0[i] + x1[i] - lw) / 2)
-        tf.draw(img, draw, tx, ys_text[i] + base_off, ln, text_rgb + (255,))
-    out_h = max(2, round(total_h / SS))
-    img = img.resize((CANVAS_W, out_h), Image.LANCZOS)
-    img.save(out_path, 'PNG')
-    return out_h
+        tf.draw(img, draw, tx, baselines[i], ln, text_rgb + (255,))
+    scale = _opt_num(opts, 'title_scale', 100, 10, 400) / 100.0
+    if abs(scale - 1.0) < 1e-6:
+        out_h = max(2, round(total_h / SS))
+        img = img.resize((CANVAS_W, out_h), Image.LANCZOS)
+        img.save(out_path, 'PNG')
+        return out_h
+    # Co giãn cả tiêu đề (chữ + nền): thu nhỏ thẳng từ ảnh phóng to SS lần (một lần lấy mẫu -> vẫn nét),
+    # rồi đặt lại trên ảnh rộng CANVAS_W sao cho điểm neo (theo căn ngang) đứng yên.
+    bb = img.getchannel('A').getbbox()
+    if bb:
+        left, right = bb[0] / SS, bb[2] / SS
+        anchor = left if halign == 'left' else (right if halign == 'right' else (left + right) / 2.0)
+    else:
+        anchor = CANVAS_W / 2.0
+    sw = max(2, int(round(CANVAS_W * scale)))
+    sh = max(2, int(round(total_h / SS * scale)))
+    scaled = img.resize((sw, sh), Image.LANCZOS)
+    out = Image.new('RGBA', (CANVAS_W, sh), (0, 0, 0, 0))
+    out.paste(scaled, (int(round(anchor * (1.0 - scale))), 0))
+    out.save(out_path, 'PNG')
+    return sh
 
 
 # ---------------------------------------------------------------------------------------------
@@ -867,6 +886,7 @@ def render_title_preview(opts, text, resolution_preset='1920x1080'):
         except OSError:
             pass
     canvas = Image.new('RGBA', (CANVAS_W, CANVAS_H), (0, 0, 0, 255))
+    canvas.paste((255, 255, 255, 255), (0, 0, CANVAS_W, TIKTOK_SAFE_TOP))  # vùng an toàn TikTok (240px trên cùng) tô trắng
     canvas.paste((255, 255, 255, 255), (px, py, px + vw, py + vh))  # hình chữ nhật trắng giả lập video
     canvas.alpha_composite(title_img, (0, title_y))
     return canvas.convert('RGB')

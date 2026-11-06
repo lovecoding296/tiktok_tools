@@ -12,12 +12,25 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 CONFIG_PATH = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)), 'settings.json')
 def load_settings():
-    defaults = {'min_len': 120, 'max_len': 180, 'speed': 1.1, 'resolution': '1080x1080 (1:1 Vuông FHD)', 'delete_original': False, 'input_dir': '', 'output_dir': '', 'title_enabled': True, 'title_size': 42, 'title_color': '#000000', 'title_halign': 'center', 'box_enabled': True, 'box_color': '#FFFFFF', 'box_opacity': 100, 'box_radius': 30, 'box_pad_x': 55, 'box_pad_y': 75, 'margin_x': 240, 'limit_enabled': False, 'limit_count': 2, 'even_enabled': False, 'even_count': 4, 'parallel': 2, 'name_style': 'paren', 'volume_db': 0.0, 'live_preview': True}
+    defaults = {'min_len': 120, 'max_len': 180, 'speed': 1.1, 'resolution': '1080x1080 (1:1 Vuông FHD)', 'delete_original': False, 'input_dir': '', 'output_dir': '', 'title_enabled': True, 'title_size': 42, 'title_color': '#000000', 'title_halign': 'center', 'box_enabled': True, 'box_color': '#FFFFFF', 'box_opacity': 100, 'box_radius': 30, 'line_pad_x': 55, 'line_gap': 0, 'line_spacing': 176, 'line_pad_y': 38, 'margin_x': 240, 'title_scale': 100, 'limit_enabled': False, 'limit_count': 2, 'even_enabled': False, 'even_count': 4, 'parallel': 2, 'name_style': 'paren', 'volume_db': 0.0, 'live_preview': True}
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
                 defaults.update(saved)
+                # Cấu hình cũ: 'line_height' (khoảng cách baseline), 'box_h_pct' (chiều cao nền), 'box_pad_x' (chiều rộng nền)
+                # -> đệm trái/phải + đệm trên/dưới của từng dòng + khoảng hở giữa các ô (hở = khoảng cách dòng - chiều cao ô).
+                legacy_pitch = int(saved['line_height']) if 'line_height' in saved else 100 + int(saved.get('box_pad_y', 75))
+                legacy_box_h = int(saved.get('box_h_pct', 175 if 'line_height' in saved else legacy_pitch))
+                if 'line_pad_x' not in saved:
+                    defaults['line_pad_x'] = int(saved.get('box_pad_x', 55))
+                if 'line_pad_y' not in saved:
+                    defaults['line_pad_y'] = (legacy_box_h - 100 + 1) // 2
+                if 'line_gap' not in saved:
+                    defaults['line_gap'] = legacy_pitch - (100 + 2 * int(defaults['line_pad_y']))
+                if 'line_spacing' not in saved:
+                    defaults['line_spacing'] = 100 + 2 * int(defaults['line_pad_y']) + int(defaults['line_gap'])
+                defaults['line_spacing'] = min(max(int(defaults['line_spacing']), 20), 600)
                 # Chỉ đổi chữ trắng -> đen với cấu hình CŨ (trước khi có ô nền, chưa có khóa 'box_color').
                 # Cấu hình mới thì tôn trọng màu người dùng đã chọn, kể cả trắng.
                 if 'box_color' not in saved and str(defaults.get('title_color', '')).upper() == '#FFFFFF':
@@ -51,7 +64,7 @@ QPushButton[tab="true"]:hover { background-color: #20232f; color: #ffffff; borde
 QPushButton[tab="true"]:checked { background-color: #242938; color: #00d2ff; border-color: #00d2ff; }
 """
 # Thông số tiêu đề gán cứng (theo settings.json), không hiển thị trên giao diện
-TITLE_FIXED = {'line_height': 100, 'font_weight': 700, 'font_width': 100, 'min_gap': 0, 'merge_step': 2.0, 'text_dy': 0, 'supersample': 4}
+TITLE_FIXED = {'font_weight': 700, 'font_width': 100, 'min_gap': 0, 'merge_step': 2.0, 'text_dy': 0, 'supersample': 4}
 NAME_STYLES = (('Pt. 1, Pt. 2, ...', 'pt'), ('-1, -2, ...', 'dash'), ('Tên(1), Tên(2), ... (liền, không cách)', 'paren'), ('1편, 2편, ...', 'pyeon'))
 def format_segment_name(base_name, index, style):
     """Tên file (không đuôi) của đoạn thứ `index` (đếm từ 1) theo kiểu đã chọn."""
@@ -583,6 +596,13 @@ class MainWindow(QMainWindow):
         self.cmb_title_halign.addItem('Trái', 'left')
         self.cmb_title_halign.addItem('Phải', 'right')
         title_grid.addWidget(self.cmb_title_halign, 2, 1)
+        title_grid.addWidget(QLabel('Tỉ lệ tiêu đề (%):'), 2, 2)
+        self.spn_title_scale = QSpinBox()
+        self.spn_title_scale.setRange(10, 400)
+        self.spn_title_scale.setValue(100)
+        self.spn_title_scale.setSingleStep(5)
+        self.spn_title_scale.setToolTip('Phóng to / thu nhỏ cả tiêu đề (chữ + nền). 100 = giữ nguyên. Tiêu đề luôn được căn giữa giữa vùng an toàn và mép trên video.')
+        title_grid.addWidget(self.spn_title_scale, 2, 3)
         self.chk_box = QCheckBox('🔲 Thêm nền (ô) phía sau chữ tiêu đề')
         self.chk_box.setChecked(True)
         title_grid.addWidget(self.chk_box, 3, 0, 1, 4)
@@ -599,7 +619,7 @@ class MainWindow(QMainWindow):
         self.spn_box_radius = QSpinBox()
         self.spn_box_radius.setRange(0, 50)
         self.spn_box_radius.setValue(30)
-        self.spn_box_radius.setToolTip('% chiều cao một dòng. 0 = vuông, 50 = bo tròn hoàn toàn (viên thuốc)')
+        self.spn_box_radius.setToolTip('% chiều cao ô nền của một dòng. 0 = vuông, 50 = bo tròn hoàn toàn (viên thuốc)')
         title_grid.addWidget(self.spn_box_radius, 5, 1)
         title_grid.addWidget(QLabel('Lề hai bên (px):'), 5, 2)
         self.spn_margin_x = QSpinBox()
@@ -607,28 +627,36 @@ class MainWindow(QMainWindow):
         self.spn_margin_x.setValue(180)
         self.spn_margin_x.setToolTip('Khoảng cách từ ô tới mép trái/phải khung. Lề càng lớn thì ô tiêu đề càng hẹp (xuống dòng nhiều hơn), lề càng nhỏ thì ô càng rộng. Tiêu đề dài hơn 3 dòng sẽ tự giảm lề dần (tối thiểu 120px) cho tới khi còn 3 dòng')
         title_grid.addWidget(self.spn_margin_x, 5, 3)
-        title_grid.addWidget(QLabel('Đệm ngang (% cỡ chữ):'), 6, 0)
-        self.spn_box_pad_x = QSpinBox()
-        self.spn_box_pad_x.setRange(0, 300)
-        self.spn_box_pad_x.setValue(50)
-        title_grid.addWidget(self.spn_box_pad_x, 6, 1)
-        title_grid.addWidget(QLabel('Đệm dọc (% cỡ chữ):'), 6, 2)
-        self.spn_box_pad_y = QSpinBox()
-        self.spn_box_pad_y.setRange(0, 300)
-        self.spn_box_pad_y.setValue(25)
-        title_grid.addWidget(self.spn_box_pad_y, 6, 3)
+        title_grid.addWidget(QLabel('Khoảng cách dòng (% cỡ chữ):'), 6, 0)
+        self.spn_line_spacing = QSpinBox()
+        self.spn_line_spacing.setRange(20, 600)
+        self.spn_line_spacing.setValue(176)
+        self.spn_line_spacing.setToolTip('Khoảng cách giữa 2 dòng chữ (từ đường chân chữ dòng trên tới dòng dưới), % cỡ chữ. ĐỘC LẬP với chiều cao ô nền: đổi đệm trên/dưới thì chữ KHÔNG nhúc nhích. Nhỏ hơn chiều cao ô (100 + 2 x đệm trên/dưới) = các ô chồng lên nhau (góc bo vẫn tự nhiên); bằng = các ô chạm nhau thành bậc thang; lớn hơn = mỗi dòng một ô riêng.')
+        title_grid.addWidget(self.spn_line_spacing, 6, 1)
+        title_grid.addWidget(QLabel('Đệm trên/dưới (% cỡ chữ):'), 6, 2)
+        self.spn_line_pad_y = QSpinBox()
+        self.spn_line_pad_y.setRange(-50, 300)
+        self.spn_line_pad_y.setValue(38)
+        self.spn_line_pad_y.setToolTip('Chiều cao ô nền của từng dòng = cỡ chữ + 2 x đệm (% cỡ chữ). Ô luôn đối xứng quanh tâm dòng chữ: tăng đệm thì mép trên và mép dưới của MỖI ô cùng kéo ra, tâm ô và chữ đứng yên, khoảng cách giữa các dòng không đổi (chỉnh ở "Khoảng cách dòng"). Ô chồng nhau thì tự hợp nhất và bo góc tự nhiên. Giá trị âm = nền ôm sát chữ hơn.')
+        title_grid.addWidget(self.spn_line_pad_y, 6, 3)
+        title_grid.addWidget(QLabel('Đệm trái/phải (% cỡ chữ):'), 7, 0)
+        self.spn_line_pad_x = QSpinBox()
+        self.spn_line_pad_x.setRange(0, 300)
+        self.spn_line_pad_x.setValue(55)
+        self.spn_line_pad_x.setToolTip('Đệm TRÁI và PHẢI mỗi dòng chữ, % cỡ chữ: nền nở ra cả hai bên từng dòng chữ. CHỈ đổi bề rộng nền: không đổi chỗ xuống dòng, không dịch chữ.')
+        title_grid.addWidget(self.spn_line_pad_x, 7, 1)
         self.chk_live = QCheckBox('🔄 Xem trước tự cập nhật khi đổi thông số (khi cửa sổ xem trước đang mở)')
         self.chk_live.setChecked(True)
-        title_grid.addWidget(self.chk_live, 7, 0, 1, 4)
-        title_grid.addWidget(QLabel('Tiêu đề test:'), 8, 0)
+        title_grid.addWidget(self.chk_live, 8, 0, 1, 4)
+        title_grid.addWidget(QLabel('Tiêu đề test:'), 9, 0)
         self.txt_title_test = QLineEdit('How Fast Is IShowSpeed Actually? (2)')
         self.txt_title_test.setPlaceholderText('Nhập tiêu đề để xem trước...')
-        title_grid.addWidget(self.txt_title_test, 8, 1, 1, 2)
+        title_grid.addWidget(self.txt_title_test, 9, 1, 1, 2)
         self.btn_title_preview = QPushButton('👁 Xem trước')
         self.btn_title_preview.setToolTip(f'Mở cửa sổ canvas {CANVAS_W}x{CANVAS_H} nền đen với tiêu đề test theo các thông số bên trên. Đổi thông số rồi bấm lại để tạo lại.')
         self.btn_title_preview.clicked.connect(self.show_title_preview)
         self.txt_title_test.returnPressed.connect(self.show_title_preview)
-        title_grid.addWidget(self.btn_title_preview, 8, 3)
+        title_grid.addWidget(self.btn_title_preview, 9, 3)
         self._preview_windows = []
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
@@ -701,8 +729,10 @@ class MainWindow(QMainWindow):
         self.spn_box_opacity.setValue(int(saved_cfg.get('box_opacity', 100)))
         self.spn_box_radius.setValue(int(saved_cfg.get('box_radius', 30)))
         self.spn_margin_x.setValue(int(saved_cfg.get('margin_x', 240)))
-        self.spn_box_pad_x.setValue(int(saved_cfg.get('box_pad_x', 55)))
-        self.spn_box_pad_y.setValue(int(saved_cfg.get('box_pad_y', 75)))
+        self.spn_title_scale.setValue(int(saved_cfg.get('title_scale', 100)))
+        self.spn_line_pad_x.setValue(int(saved_cfg.get('line_pad_x', 55)))
+        self.spn_line_spacing.setValue(int(saved_cfg.get('line_spacing', 176)))
+        self.spn_line_pad_y.setValue(int(saved_cfg.get('line_pad_y', 38)))
         self.chk_live.setChecked(bool(saved_cfg.get('live_preview', True)))
         idx_h = self.cmb_title_halign.findData(saved_cfg.get('title_halign', 'center'))
         self.cmb_title_halign.setCurrentIndex(idx_h if idx_h >= 0 else 0)
@@ -729,12 +759,12 @@ class MainWindow(QMainWindow):
         self.chk_box.stateChanged.connect(self.save_current_settings)
         self.spn_title_size.valueChanged.connect(self.save_current_settings)
         self.cmb_title_halign.currentIndexChanged.connect(self.save_current_settings)
-        for spn in (self.spn_box_opacity, self.spn_box_radius, self.spn_margin_x, self.spn_box_pad_x, self.spn_box_pad_y):
+        for spn in (self.spn_box_opacity, self.spn_box_radius, self.spn_margin_x, self.spn_line_pad_x, self.spn_line_spacing, self.spn_line_pad_y, self.spn_title_scale):
             spn.valueChanged.connect(self.save_current_settings)
         self.chk_live.stateChanged.connect(self.save_current_settings)
         # Xem trước tự cập nhật (debounce 250ms) khi đổi bất kỳ thông số tiêu đề nào
         live_spins = (self.spn_title_size, self.spn_box_opacity, self.spn_box_radius, self.spn_margin_x,
-                      self.spn_box_pad_x, self.spn_box_pad_y)
+                      self.spn_line_pad_x, self.spn_line_spacing, self.spn_line_pad_y, self.spn_title_scale)
         for spn in live_spins:
             spn.valueChanged.connect(self._schedule_preview)
         self.cmb_title_halign.currentIndexChanged.connect(self._schedule_preview)
@@ -857,10 +887,10 @@ class MainWindow(QMainWindow):
         enabled = self.chk_title.isChecked()
         box_on = enabled and self.chk_box.isChecked()
         for w in (self.spn_title_size, self.btn_title_color, self.cmb_title_halign,
-                  self.spn_margin_x, self.chk_box, self.chk_live, self.btn_title_preview, self.txt_title_test):
+                  self.spn_margin_x, self.spn_title_scale, self.spn_line_spacing, self.chk_box, self.chk_live, self.btn_title_preview, self.txt_title_test):
             w.setEnabled(enabled)
         for w in (self.btn_box_color, self.spn_box_opacity, self.spn_box_radius,
-                  self.spn_box_pad_x, self.spn_box_pad_y):
+                  self.spn_line_pad_x, self.spn_line_pad_y):
             w.setEnabled(box_on)
     def set_title_color(self, hex_color):
         color = QColor(str(hex_color))
@@ -896,7 +926,7 @@ class MainWindow(QMainWindow):
         return self._build_title_opts()
     def _preview_info(self):
         o = self._build_title_opts()
-        info = (f"cỡ {o['size']} | đệm ngang {o['box_pad_x']} dọc {o['box_pad_y']} | bo {o['box_radius']} | lề {o['margin_x']}")
+        info = (f"cỡ {o['size']} | đệm trái/phải {o['line_pad_x']} | đệm trên/dưới {o['line_pad_y']} | cách dòng {o['line_spacing']} | bo {o['box_radius']} | lề {o['margin_x']} | tỉ lệ {o['title_scale']}%")
         _eng = sys.modules.get(render_title_preview.__module__)
         info += f" | engine: {getattr(_eng, 'TITLE_LAYOUT', 'CŨ')} @ {os.path.abspath(getattr(_eng, '__file__', '?'))}"
         return info
@@ -955,11 +985,12 @@ class MainWindow(QMainWindow):
         opts = {'size': self.spn_title_size.value(), 'color': self.title_color,
                 'halign': self.cmb_title_halign.currentData(),
                 'box_enabled': self.chk_box.isChecked(), 'box_color': self.box_color, 'box_opacity': self.spn_box_opacity.value() if self.chk_box.isChecked() else 0, 'box_radius': self.spn_box_radius.value(),
-                'box_pad_x': self.spn_box_pad_x.value(), 'box_pad_y': self.spn_box_pad_y.value(), 'margin_x': self.spn_margin_x.value()}
+                'line_pad_x': self.spn_line_pad_x.value(), 'line_spacing': self.spn_line_spacing.value(), 'line_pad_y': self.spn_line_pad_y.value(), 'margin_x': self.spn_margin_x.value(),
+                'title_scale': self.spn_title_scale.value()}
         opts.update(TITLE_FIXED)
         return opts
     def save_current_settings(self):
-        cfg = {'min_len': self.spn_min_len.value(), 'max_len': self.spn_max_len.value(), 'speed': self.spn_speed.value(), 'resolution': self.cmb_resolution.currentText(), 'delete_original': self.chk_delete_original.isChecked(), 'input_dir': self.txt_input_dir.text().strip(), 'output_dir': self.txt_output_dir.text().strip(), 'title_enabled': self.chk_title.isChecked(), 'title_size': self.spn_title_size.value(), 'title_color': self.title_color, 'title_halign': self.cmb_title_halign.currentData(), 'box_enabled': self.chk_box.isChecked(), 'box_color': self.box_color, 'box_opacity': self.spn_box_opacity.value(), 'box_radius': self.spn_box_radius.value(), 'box_pad_x': self.spn_box_pad_x.value(), 'box_pad_y': self.spn_box_pad_y.value(), 'margin_x': self.spn_margin_x.value(), 'limit_enabled': self.chk_limit.isChecked(), 'limit_count': self.spn_limit.value(), 'even_enabled': self.chk_even.isChecked(), 'even_count': self.spn_even.value(), 'parallel': self.spn_parallel.value(), 'name_style': self.cmb_name_style.currentData(), 'volume_db': self.spn_volume.value(),
+        cfg = {'min_len': self.spn_min_len.value(), 'max_len': self.spn_max_len.value(), 'speed': self.spn_speed.value(), 'resolution': self.cmb_resolution.currentText(), 'delete_original': self.chk_delete_original.isChecked(), 'input_dir': self.txt_input_dir.text().strip(), 'output_dir': self.txt_output_dir.text().strip(), 'title_enabled': self.chk_title.isChecked(), 'title_size': self.spn_title_size.value(), 'title_color': self.title_color, 'title_halign': self.cmb_title_halign.currentData(), 'box_enabled': self.chk_box.isChecked(), 'box_color': self.box_color, 'box_opacity': self.spn_box_opacity.value(), 'box_radius': self.spn_box_radius.value(), 'line_pad_x': self.spn_line_pad_x.value(), 'line_spacing': self.spn_line_spacing.value(), 'line_pad_y': self.spn_line_pad_y.value(), 'margin_x': self.spn_margin_x.value(), 'title_scale': self.spn_title_scale.value(), 'limit_enabled': self.chk_limit.isChecked(), 'limit_count': self.spn_limit.value(), 'even_enabled': self.chk_even.isChecked(), 'even_count': self.spn_even.value(), 'parallel': self.spn_parallel.value(), 'name_style': self.cmb_name_style.currentData(), 'volume_db': self.spn_volume.value(),
                'live_preview': self.chk_live.isChecked()}
         save_settings(cfg)
     def closeEvent(self, event):
