@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "YT Channel Link Copier",
+  "version": "1.0",
+  "description": "Copy tất cả link kênh YouTube trên trang hiện tại vào clipboard.",
+  "permissions": ["activeTab", "scripting", "clipboardWrite"],
+  "action": {
+    "default_title": "Copy link kênh YouTube",
+    "default_popup": "popup.html"
+  }
+}

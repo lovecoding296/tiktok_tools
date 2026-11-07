@@ -6,6 +6,8 @@
 
 *service_account.json
 
+chuyen/config.json
+chuyen/state.json
 
 # Build output folders
 build/

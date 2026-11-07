@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { margin: 0; padding: 14px; width: 260px; font-family: system-ui, Arial, sans-serif; }
+    .row { display: flex; align-items: center; gap: 10px; }
+    button {
+      padding: 8px 18px; border: 0; border-radius: 6px;
+      background: #cc0000; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    button:hover { background: #a80000; }
+    button:disabled { opacity: .6; cursor: default; }
+    #status { font-size: 13px; color: #333; }
+    #status.ok { color: #0a7d2c; }
+    #status.err { color: #c00; }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <button id="copyBtn">Copy</button>
+    <span id="status"></span>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
