@@ -8,6 +8,8 @@
 
 chuyen/config.json
 chuyen/state.json
+search tiktok/chrome_tiktok_profile
+tiktok fl/tiktok_profile_firefox
 
 # Build output folders
 build/
