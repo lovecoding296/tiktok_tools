@@ -42,7 +42,7 @@ COLOR_ROW = {"": "#ffffff", "ok": "#c6efce", "bad": "#f4c7c3"}
 
 CH_TABS = {"videos": "Videos", "shorts": "Shorts", "streams": "Live"}
 
-CH_SORTS = ["Lượt xem giảm dần", "Lượt xem tăng dần", "Mới nhất trước"]
+CH_SORTS = ["Views (high to low)", "Views (low to high)", "Newest first"]
 
 PALETTE = {
     "green":  ("#2e9e4f", "#278a43"),   # bắt đầu / lưu / đúng
@@ -350,14 +350,14 @@ class Dialogs:
 class FileDialogs:
     @staticmethod
     def askopenfilenames(**kwargs):
-        files, _ = QFileDialog.getOpenFileNames(None, kwargs.get("title","Chọn file"), "", "Text files (*.txt);;All files (*.*)")
+        files, _ = QFileDialog.getOpenFileNames(None, kwargs.get("title","Select file"), "", "Text files (*.txt);;All files (*.*)")
         return files
     @staticmethod
     def askdirectory(**kwargs):
-        return QFileDialog.getExistingDirectory(None, kwargs.get("title","Chọn thư mục"))
+        return QFileDialog.getExistingDirectory(None, kwargs.get("title","Select folder"))
     @staticmethod
     def asksaveasfilename(**kwargs):
-        path, _ = QFileDialog.getSaveFileName(None, "Lưu file", "", "Text files (*.txt)")
+        path, _ = QFileDialog.getSaveFileName(None, "Save file", "", "Text files (*.txt)")
         return path
 
 messagebox = Dialogs
@@ -396,6 +396,7 @@ class App(QMainWindow):
         self.sort_mode = ""
         self.sort_desc = True
         self.filter_type = ""
+        self.search_text = ""
         self.title_wrap = 420
         self._refresh_job = None
 
@@ -443,6 +444,9 @@ class App(QMainWindow):
         self.setStyleSheet("""
             QMainWindow, QWidget { background:#F4F6FA; color:#172033; font-family:'Segoe UI'; font-size:10pt; }
             QFrame#panel { background:#FFFFFF; border:1px solid #E3E8F0; border-radius:10px; }
+            QFrame#topbar { background:#E9EDF3; border:1px solid #D7DEE9; border-radius:10px; }
+            QLabel, QCheckBox { background:transparent; }
+            QWidget#cell { background:transparent; }
             QLabel#sectionTitle { font-size:11pt; font-weight:650; color:#172033; }
             QLineEdit, QTextEdit, QComboBox {
                 background:#FFFFFF; border:1px solid #D7DEE9; border-radius:7px;
@@ -459,6 +463,7 @@ class App(QMainWindow):
             QTableWidget { background:#FFFFFF; border:1px solid #E2E8F0; border-radius:7px; gridline-color:#EDF0F4; }
             QHeaderView::section { background:#F1F4F8; color:#455269; padding:9px 6px; border:0; border-bottom:1px solid #DDE4ED; font-weight:600; }
             QTableWidget::item { padding:5px; }
+            QHeaderView::section:hover { background:#E3EAF4; }
             QTabWidget::pane { border:1px solid #E2E8F0; border-radius:8px; background:white; }
             QTabBar::tab { background:#E9EEF5; padding:8px 14px; margin-right:3px; border-top-left-radius:6px; border-top-right-radius:6px; }
             QTabBar::tab:selected { background:#FFFFFF; color:#2563EB; font-weight:600; }
@@ -470,27 +475,27 @@ class App(QMainWindow):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
-        top = QFrame(); top.setObjectName("panel")
+        top = QFrame(); top.setObjectName("topbar")
         top_l = QHBoxLayout(top); top_l.setContentsMargins(12,8,12,8); top_l.setSpacing(8)
-        top_l.addWidget(QLabel("Delay (giây):"))
+        top_l.addWidget(QLabel("Delay (sec):"))
         self.ed_delay = QLineEdit("2"); self.ed_delay.setFixedWidth(62); top_l.addWidget(self.ed_delay)
         self.ed_delay.textChanged.connect(lambda v: (self.delay_var.set(v), self._sync_opts()))
-        top_l.addWidget(QLabel("Kiểm tra top:"))
+        top_l.addWidget(QLabel("Check top:"))
         self.ed_topn = QLineEdit("5"); self.ed_topn.setFixedWidth(58); top_l.addWidget(self.ed_topn)
         self.ed_topn.textChanged.connect(lambda v: (self.topn_var.set(v), self._sync_opts()))
-        top_l.addWidget(QLabel("Thừa tối đa (từ):"))
+        top_l.addWidget(QLabel("Max extra words:"))
         self.ed_extra = QLineEdit("2"); self.ed_extra.setFixedWidth(58); top_l.addWidget(self.ed_extra)
         self.ed_extra.textChanged.connect(lambda v: (self.extra_var.set(v), self._sync_opts()))
-        self.chk_strip = QCheckBox("Bỏ qua #hashtag/@mention"); self.chk_strip.setChecked(True)
+        self.chk_strip = QCheckBox("Ignore #hashtag/@mention"); self.chk_strip.setChecked(True)
         self.chk_strip.toggled.connect(self.strip_tag_var.set); top_l.addWidget(self.chk_strip)
         top_l.addStretch(1)
-        self.btn_open_chrome = self._button("Mở Chrome", self.open_chrome, "#D97706")
+        self.btn_open_chrome = self._button("Open Chrome", self.open_chrome, "#D97706")
         top_l.addWidget(self.btn_open_chrome)
-        self.btn_start = self._button("▶ Bắt đầu", self.start, "#16A34A"); top_l.addWidget(self.btn_start)
-        self.btn_stop = self._button("■ Dừng", self.stop, "#DC4545"); self.btn_stop.setEnabled(False); top_l.addWidget(self.btn_stop)
+        self.btn_start = self._button("▶ Start", self.start, "#16A34A"); top_l.addWidget(self.btn_start)
+        self.btn_stop = self._button("■ Stop", self.stop, "#DC4545"); self.btn_stop.setEnabled(False); top_l.addWidget(self.btn_stop)
         root.addWidget(top)
 
-        self.status = StatusLabel("Sẵn sàng")
+        self.status = StatusLabel("Ready")
         self.status.setStyleSheet("color:#526078; padding:1px 4px;")
         root.addWidget(self.status)
 
@@ -505,16 +510,16 @@ class App(QMainWindow):
 
         list_panel = QFrame(); list_panel.setObjectName("panel")
         lp = QVBoxLayout(list_panel); lp.setContentsMargins(10,9,10,9); lp.setSpacing(7)
-        title = QLabel("Danh sách tiêu đề để tìm trên TikTok"); title.setObjectName("sectionTitle"); lp.addWidget(title)
-        self.title_edit = QTextEdit(); self.title_edit.setPlaceholderText("Mỗi dòng một tiêu đề hoặc #video_id|tiêu đề")
+        title = QLabel("Titles to search on TikTok"); title.setObjectName("sectionTitle"); lp.addWidget(title)
+        self.title_edit = QTextEdit(); self.title_edit.setPlaceholderText("One title per line, or #video_id|title")
         self.title_edit.setAcceptRichText(False); lp.addWidget(self.title_edit, 1)
         self.txt_titles = TextAdapter(self.title_edit)
         bl = QHBoxLayout()
         for text, fn, col in [
-            ("Mở file .txt", self.load_file, "#64748B"),
-            ("Mở thư mục", self.load_list_dir, "#64748B"),
-            ("Lưu danh sách", self.save_titles, "#16A34A"),
-            ("Xóa", self._clear_titles, "#DC4545")]:
+            ("Open .txt file", self.load_file, "#64748B"),
+            ("Open folder", self.load_list_dir, "#64748B"),
+            ("Save list", self.save_titles, "#16A34A"),
+            ("Clear", self._clear_titles, "#DC4545")]:
             bl.addWidget(self._button(text, fn, col))
         lp.addLayout(bl); ll.addWidget(list_panel, 1)
         splitter.addWidget(left)
@@ -522,26 +527,33 @@ class App(QMainWindow):
         right = QWidget(); rl = QVBoxLayout(right); rl.setContentsMargins(5,0,0,0); rl.setSpacing(9)
         table_panel = QFrame(); table_panel.setObjectName("panel")
         tp = QVBoxLayout(table_panel); tp.setContentsMargins(10,9,10,9); tp.setSpacing(7)
-        section = QLabel("KHÔNG tìm thấy trên TikTok"); section.setObjectName("sectionTitle"); tp.addWidget(section)
+        section = QLabel("NOT found on TikTok"); section.setObjectName("sectionTitle"); tp.addWidget(section)
         tools = QHBoxLayout()
-        self.btn_sort_views = self._button("Lượt xem", lambda: self.toggle_sort("views"), "#64748B")
-        self.btn_sort_date = self._button("Ngày đăng", lambda: self.toggle_sort("date"), "#64748B")
-        self.btn_f_video = self._button("Video", lambda: self.toggle_filter("video"), "#2563EB")
-        self.btn_f_short = self._button("Short", lambda: self.toggle_filter("short"), "#D6336C")
+        self.ed_search = QLineEdit()
+        self.ed_search.setPlaceholderText("🔍 Search title...")
+        self.ed_search.setClearButtonEnabled(True)
+        self.ed_search.setFixedWidth(240)
+        self.ed_search.textChanged.connect(self.on_search_changed)
+        tools.addWidget(self.ed_search)
         self.btn_meta = self._button("⟳ Load Metadata", self.meta_toggle, "#7C55C7")
-        for b in (self.btn_sort_views,self.btn_sort_date,self.btn_f_video,self.btn_f_short,self.btn_meta): tools.addWidget(b)
+        self.btn_meta.setToolTip("Load Metadata")
+        tools.addWidget(self.btn_meta)
         tools.addStretch(1)
-        tools.addWidget(self._button("Mở file...", self.choose_nf_files, "#64748B"))
-        tools.addWidget(self._button("Mở thư mục...", self.choose_nf_dir, "#64748B"))
+        tools.addWidget(self._button("Open file...", self.choose_nf_files, "#64748B"))
+        tools.addWidget(self._button("Open folder...", self.choose_nf_dir, "#64748B"))
+        tools.addWidget(self._button("Clear", self.clear_table, "#DC4545"))
         tp.addLayout(tools)
-        self.lbl_counts = QLabel("Tổng 0"); self.lbl_counts.setStyleSheet("color:#64748B;"); tp.addWidget(self.lbl_counts)
+        self.lbl_counts = QLabel("Total 0"); self.lbl_counts.setStyleSheet("color:#64748B;"); tp.addWidget(self.lbl_counts)
         self.nf_table = QTableWidget(0,5)
-        self.nf_table.setHorizontalHeaderLabels(["Loại","Tiêu đề","Lượt xem","Ngày đăng","Thao tác"])
+        self.nf_table.setHorizontalHeaderLabels(["Type","Title","Views","Date","Actions"])
         self.nf_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.nf_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.nf_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.nf_table.verticalHeader().setVisible(False)
         h = self.nf_table.horizontalHeader()
+        h.setSectionsClickable(True)
+        h.setCursor(Qt.CursorShape.PointingHandCursor)
+        h.sectionClicked.connect(self.on_header_clicked)
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         h.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -549,6 +561,7 @@ class App(QMainWindow):
         h.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.nf_table.setColumnWidth(4, 170)
         self.nf_table.setAlternatingRowColors(True)
+        self.nf_table.cellClicked.connect(self.on_cell_clicked)
         tp.addWidget(self.nf_table, 1)
         rl.addWidget(table_panel, 3)
 
@@ -561,7 +574,7 @@ class App(QMainWindow):
         rl.addWidget(log_panel, 1)
         splitter.addWidget(right)
         splitter.setSizes([520, 900])
-        self._paint_filter()
+        self._update_headers()
 
     def _button(self, text, callback, color="#64748B"):
         b = CompatButton(text)
@@ -571,12 +584,12 @@ class App(QMainWindow):
 
     def _build_youtube_search_tab(self):
         page = QWidget(); grid = QGridLayout(page); grid.setContentsMargins(10,10,10,10); grid.setHorizontalSpacing(8); grid.setVerticalSpacing(8)
-        self.yt_kw = QLineEdit(); self.yt_kw.setPlaceholderText("Nhập từ khóa YouTube")
+        self.yt_kw = QLineEdit(); self.yt_kw.setPlaceholderText("Enter YouTube keyword")
         self.yt_views = QLineEdit("100000"); self.yt_views.setFixedWidth(105)
         self.yt_max = QLineEdit("200"); self.yt_max.setFixedWidth(75)
         self.yt_scan = QLineEdit("1000"); self.yt_scan.setFixedWidth(105)
-        self.yt_append = QCheckBox("Thêm vào danh sách (không xóa cũ)")
-        self.yt_english = QCheckBox("Chỉ lấy tiêu đề tiếng Anh"); self.yt_english.setChecked(True)
+        self.yt_append = QCheckBox("Append to list (keep existing)")
+        self.yt_english = QCheckBox("English titles only"); self.yt_english.setChecked(True)
         self.yt_kw.textChanged.connect(self.yt_kw_var.set)
         self.yt_views.textChanged.connect(self.yt_views_var.set)
         self.yt_max.textChanged.connect(self.yt_max_var.set)
@@ -584,43 +597,43 @@ class App(QMainWindow):
         self.yt_append.toggled.connect(self.yt_append_var.set)
         self.yt_english.toggled.connect(self.yt_english_var.set)
         self.yt_kw.returnPressed.connect(self.yt_start)
-        grid.addWidget(QLabel("Từ khóa:"),0,0); grid.addWidget(self.yt_kw,0,1,1,3)
-        grid.addWidget(QLabel("View tối thiểu:"),1,0); grid.addWidget(self.yt_views,1,1)
-        grid.addWidget(QLabel("Số tiêu đề tối đa:"),1,2); grid.addWidget(self.yt_max,1,3)
-        grid.addWidget(QLabel("Quét tối đa:"),2,0); grid.addWidget(self.yt_scan,2,1)
+        grid.addWidget(QLabel("Keyword:"),0,0); grid.addWidget(self.yt_kw,0,1,1,3)
+        grid.addWidget(QLabel("Min views:"),1,0); grid.addWidget(self.yt_views,1,1)
+        grid.addWidget(QLabel("Max titles:"),1,2); grid.addWidget(self.yt_max,1,3)
+        grid.addWidget(QLabel("Max scan:"),2,0); grid.addWidget(self.yt_scan,2,1)
         grid.addWidget(self.yt_append,2,2,1,2)
         grid.addWidget(self.yt_english,3,0,1,2)
-        self.btn_yt = self._button("🔍 Tìm YouTube", self.yt_start, "#2563EB")
-        self.btn_yt_stop = self._button("Dừng tìm", self.yt_stop, "#DC4545"); self.btn_yt_stop.setEnabled(False)
+        self.btn_yt = self._button("🔍 Search YouTube", self.yt_start, "#2563EB")
+        self.btn_yt_stop = self._button("Stop search", self.yt_stop, "#DC4545"); self.btn_yt_stop.setEnabled(False)
         row=QHBoxLayout(); row.addWidget(self.btn_yt); row.addWidget(self.btn_yt_stop); row.addStretch(1); grid.addLayout(row,4,0,1,4)
-        self.tabs.addTab(page,"Tìm theo từ khóa")
+        self.tabs.addTab(page,"Keyword search")
 
     def _build_channel_tab(self):
         page = QWidget(); grid = QGridLayout(page); grid.setContentsMargins(10,10,10,10); grid.setHorizontalSpacing(8); grid.setVerticalSpacing(6)
-        grid.addWidget(QLabel("Link kênh / @handle (mỗi dòng 1 kênh):"),0,0,1,4)
+        grid.addWidget(QLabel("Channel link / @handle (one per line):"),0,0,1,4)
         self.channels_edit = QTextEdit(); self.channels_edit.setMaximumHeight(65); self.channels_edit.setPlaceholderText("https://www.youtube.com/@channel")
         grid.addWidget(self.channels_edit,1,0,1,4); self.txt_channels = TextAdapter(self.channels_edit)
         self.ch_limit = QLineEdit("200"); self.ch_views = QLineEdit("500000")
         self.ch_limit.textChanged.connect(self.ch_limit_var.set)
         self.ch_views.textChanged.connect(self.ch_views_var.set)
-        grid.addWidget(QLabel("Giới hạn số video:"),2,0); grid.addWidget(self.ch_limit,2,1)
-        grid.addWidget(QLabel("View tối thiểu:"),2,2); grid.addWidget(self.ch_views,2,3)
-        self.ch_sort = QComboBox(); self.ch_sort.addItems(CH_SORTS); self.ch_sort.currentTextChanged.connect(self.ch_sort_var.set); grid.addWidget(QLabel("Sắp xếp:"),3,0); grid.addWidget(self.ch_sort,3,1,1,3)
-        grid.addWidget(QLabel("Quét tab:"),4,0)
+        grid.addWidget(QLabel("Video limit:"),2,0); grid.addWidget(self.ch_limit,2,1)
+        grid.addWidget(QLabel("Min views:"),2,2); grid.addWidget(self.ch_views,2,3)
+        self.ch_sort = QComboBox(); self.ch_sort.addItems(CH_SORTS); self.ch_sort.currentTextChanged.connect(self.ch_sort_var.set); grid.addWidget(QLabel("Sort by:"),3,0); grid.addWidget(self.ch_sort,3,1,1,3)
+        grid.addWidget(QLabel("Scan tabs:"),4,0)
         self.ch_tabs_checks={}
         tabs_box=QHBoxLayout()
         for key,label in CH_TABS.items():
             cb=QCheckBox(label); cb.setChecked(True); cb.toggled.connect(self.ch_tab_vars[key].set); self.ch_tabs_checks[key]=cb; tabs_box.addWidget(cb)
         tabs_box.addStretch(1); grid.addLayout(tabs_box,4,1,1,3)
-        self.ch_detail=QCheckBox("Lấy view chi tiết nếu thiếu (chậm)"); self.ch_detail.setChecked(True); self.ch_detail.toggled.connect(self.ch_detail_var.set)
-        self.ch_english=QCheckBox("Chỉ tiếng Anh"); self.ch_english.toggled.connect(self.ch_english_var.set); self.ch_append=QCheckBox("Thêm vào danh sách (không xóa cũ)"); self.ch_append.toggled.connect(self.ch_append_var.set)
+        self.ch_detail=QCheckBox("Fetch detailed views if missing (slow)"); self.ch_detail.setChecked(True); self.ch_detail.toggled.connect(self.ch_detail_var.set)
+        self.ch_english=QCheckBox("English only"); self.ch_english.toggled.connect(self.ch_english_var.set); self.ch_append=QCheckBox("Append to list (keep existing)"); self.ch_append.toggled.connect(self.ch_append_var.set)
         opts=QHBoxLayout(); opts.addWidget(self.ch_detail); opts.addWidget(self.ch_english); opts.addWidget(self.ch_append); grid.addLayout(opts,5,0,1,4)
-        self.ch_dir=QLineEdit(str(BASE_DIR)); self.ch_dir.textChanged.connect(self.ch_dir_var.set); grid.addWidget(QLabel("Thư mục gốc:"),6,0); grid.addWidget(self.ch_dir,6,1,1,2)
-        grid.addWidget(self._button("Chọn...",self.choose_ch_dir,"#64748B"),6,3)
-        self.btn_ch=self._button("🔍 Quét kênh",self.ch_start,"#2563EB")
-        self.btn_ch_stop=self._button("Dừng quét",self.yt_stop,"#DC4545"); self.btn_ch_stop.setEnabled(False)
+        self.ch_dir=QLineEdit(str(BASE_DIR)); self.ch_dir.textChanged.connect(self.ch_dir_var.set); grid.addWidget(QLabel("Root folder:"),6,0); grid.addWidget(self.ch_dir,6,1,1,2)
+        grid.addWidget(self._button("Browse...",self.choose_ch_dir,"#64748B"),6,3)
+        self.btn_ch=self._button("🔍 Scan channel",self.ch_start,"#2563EB")
+        self.btn_ch_stop=self._button("Stop scan",self.yt_stop,"#DC4545"); self.btn_ch_stop.setEnabled(False)
         row=QHBoxLayout(); row.addWidget(self.btn_ch); row.addWidget(self.btn_ch_stop); row.addStretch(1); grid.addLayout(row,7,0,1,4)
-        self.tabs.addTab(page,"Quét kênh YouTube")
+        self.tabs.addTab(page,"YouTube channel scan")
 
     def _clear_titles(self): self.title_edit.clear()
 
@@ -675,14 +688,15 @@ class App(QMainWindow):
                 bg={"ok":"#E2F5E8","bad":"#FCE8E8","":"#FFFFFF"}.get(it["status"],"#FFFFFF")
                 cell.setBackground(QColor(bg))
                 self.nf_table.setItem(row,col,cell)
-            actions=QWidget(); al=QHBoxLayout(actions); al.setContentsMargins(3,2,3,2); al.setSpacing(4)
+            actions=QWidget(); actions.setObjectName("cell"); al=QHBoxLayout(actions); al.setContentsMargins(3,2,3,2); al.setSpacing(4)
             copy=self._button("Copy",lambda _,item=it:self.copy_link(item),"#2563EB")
             ok=self._button("✓",lambda _,item=it:self.set_item_status(item,"ok"),"#16A34A")
             bad=self._button("✕",lambda _,item=it:self.set_item_status(item,"bad"),"#DC4545")
             copy.setFixedWidth(58); ok.setFixedWidth(42); bad.setFixedWidth(42)
+            for _b in (copy, ok, bad): _b.setFixedHeight(32)
             al.addWidget(copy); al.addWidget(ok); al.addWidget(bad)
             self.nf_table.setCellWidget(row,4,actions)
-            self.nf_table.setRowHeight(row,38 if len(it["title"])<95 else 52)
+            self.nf_table.setRowHeight(row,54 if len(it["title"])<95 else 70)
         self.nf_table.setUpdatesEnabled(True)
         self.update_counts(len(items))
 
@@ -690,22 +704,19 @@ class App(QMainWindow):
         n=len(self.nf); v=sum(1 for i in self.nf.values() if i["type"]=="video")
         ok=sum(1 for i in self.nf.values() if i["status"]=="ok")
         bad=sum(1 for i in self.nf.values() if i["status"]=="bad")
-        txt=f"Tổng {n} | video {v} | short {n-v} | ✓ {ok} | ✕ {bad} | lỗi/captcha: {len(self.err)}"
-        if shown is not None and shown != n: txt += f" | đang hiện {shown}"
+        txt=f"Total {n} | video {v} | short {n-v} | ✓ {ok} | ✕ {bad} | errors/captcha: {len(self.err)}"
+        if shown is not None and shown != n: txt += f" | showing {shown}"
         self.lbl_counts.setText(txt)
 
     def toggle_sort(self, mode):
         if self.sort_mode != mode: self.sort_mode,self.sort_desc=mode,True
         elif self.sort_desc: self.sort_desc=False
         else: self.sort_mode,self.sort_desc="",True
-        arrow="▼" if self.sort_desc else "▲"
-        self.btn_sort_views.setText("Lượt xem"+(f" {arrow}" if self.sort_mode=="views" else ""))
-        self.btn_sort_date.setText("Ngày đăng"+(f" {arrow}" if self.sort_mode=="date" else ""))
+        self._update_headers()
         self.refresh_table()
 
     def _paint_filter(self):
-        self.btn_f_video.setStyleSheet("background:#2563EB;color:white;" if self.filter_type=="video" else "background:#EFF5FF;color:#2563EB;border:1px solid #2563EB;")
-        self.btn_f_short.setStyleSheet("background:#D6336C;color:white;" if self.filter_type=="short" else "background:#FFF0F5;color:#D6336C;border:1px solid #D6336C;")
+        self._update_headers()
 
     def set_item_status(self, item, st):
         new="" if item["status"]==st else st
@@ -740,9 +751,9 @@ class App(QMainWindow):
 
     def open_chrome(self):
         if launch_chrome():
-            self.log("Chrome đã sẵn sàng (cổng 9222). Hãy đăng nhập TikTok nếu cần.")
+            self.log("Chrome is ready (port 9222). Log in to TikTok if needed.")
         else:
-            messagebox.showerror("Lỗi", "Không tìm thấy Chrome. Hãy sửa CHROME_PATHS trong code.")
+            messagebox.showerror("Error", "Chrome not found. Edit CHROME_PATHS in the code.")
 
     def import_file(self, p: Path) -> list:
         """Đọc 1 file -> [(vid, title, meta)] đã chuẩn hóa (type/src) và nhớ thư mục lưu của từng nguồn."""
@@ -806,8 +817,8 @@ class App(QMainWindow):
                     files.append(p)
         dirs = list(dict.fromkeys(dirs))
         if not dirs and not files:
-            messagebox.showinfo("Không có dữ liệu",
-                                "Không thấy video.txt / short.txt / error.txt hoặc file .txt nào để nạp.")
+            messagebox.showinfo("No data",
+                                "No video.txt / short.txt / error.txt or other .txt files found to load.")
             return
         self.nf.clear()
         self.err.clear()
@@ -820,17 +831,17 @@ class App(QMainWindow):
             for vid, title, m in self.import_file(f):
                 self.add_loaded(vid, title, m)
         self.refresh_table()
-        self.log(f"Đã nạp bảng không tìm thấy: {len(self.nf)} dòng "
-                 f"({len(dirs)} thư mục, {len(files)} file lẻ).")
+        self.log(f"Loaded not-found table: {len(self.nf)} rows "
+                 f"({len(dirs)} folders, {len(files)} loose files).")
 
     def choose_nf_files(self):
-        ps = filedialog.askopenfilenames(title="Chọn file không tìm thấy (video.txt / short.txt ...)",
+        ps = filedialog.askopenfilenames(title="Select not-found files (video.txt / short.txt ...)",
                                          filetypes=[("Text", "*.txt"), ("All", "*.*")])
         if ps:
             self.load_not_found_paths(list(ps))
 
     def choose_nf_dir(self):
-        d = filedialog.askdirectory(title="Chọn thư mục kênh (hoặc thư mục chứa nhiều kênh)")
+        d = filedialog.askdirectory(title="Select a channel folder (or a folder containing several channels)")
         if d:
             self.load_not_found_paths([d])
 
@@ -843,7 +854,7 @@ class App(QMainWindow):
             elif p.is_file():
                 files.append(p)
         if not files:
-            messagebox.showinfo("Không có dữ liệu", "Không tìm thấy file .txt nào.")
+            messagebox.showinfo("No data", "No .txt files found.")
             return
         lines, seen = [], set()
         for f in files:
@@ -856,7 +867,7 @@ class App(QMainWindow):
         self.txt_titles.delete("1.0", "end")
         if lines:
             self.txt_titles.insert("1.0", "\n".join(lines) + "\n")
-        self.log(f"Đã nạp danh sách: {len(lines)} dòng từ {len(files)} file.")
+        self.log(f"Loaded list: {len(lines)} lines from {len(files)} files.")
 
     def load_file(self):
         ps = filedialog.askopenfilenames(filetypes=[("Text", "*.txt"), ("All", "*.*")])
@@ -864,7 +875,7 @@ class App(QMainWindow):
             self.load_list_paths(list(ps))
 
     def load_list_dir(self):
-        d = filedialog.askdirectory(title="Chọn thư mục (nạp mọi file .txt bên trong)")
+        d = filedialog.askdirectory(title="Select a folder (loads every .txt file inside)")
         if d:
             self.load_list_paths([d])
 
@@ -907,7 +918,7 @@ class App(QMainWindow):
             if any(groups.values()):
                 self.register_dir(d)
         except OSError as e:
-            self.log(f"⚠ Không ghi được thư mục {d}: {e}")
+            self.log(f"⚠ Could not write folder {d}: {e}")
 
     def register_dir(self, d: Path):
         s = str(d)
@@ -934,13 +945,17 @@ class App(QMainWindow):
                 self.load_state_dir(d)
                 self.nf_dirs.append(str(d))
         if self.nf:
-            self.log(f"Đã nạp lại bảng không tìm thấy từ lần trước: {len(self.nf)} dòng.")
+            self.log(f"Reloaded not-found table from last session: {len(self.nf)} rows.")
         self.refresh_table()
 
     def visible_items(self) -> list:
         items = list(self.nf.values())
         if self.filter_type:
             items = [i for i in items if i["type"] == self.filter_type]
+        q = self.search_text
+        if q:
+            items = [i for i in items
+                     if q in unicodedata.normalize("NFC", i["title"]).lower()]
         desc = self.sort_desc
         if self.sort_mode == "views":
             items.sort(key=lambda i: (i["views"] is None,
@@ -961,29 +976,78 @@ class App(QMainWindow):
         v = sum(1 for i in self.nf.values() if i["type"] == "video")
         ok = sum(1 for i in self.nf.values() if i["status"] == "ok")
         bad = sum(1 for i in self.nf.values() if i["status"] == "bad")
-        txt = f"Tổng {n} | video {v} | short {n - v} | ✔ {ok} | ✖ {bad} | lỗi/captcha: {len(self.err)}"
+        txt = f"Total {n} | video {v} | short {n - v} | ✔ {ok} | ✖ {bad} | errors/captcha: {len(self.err)}"
         if shown is not None and shown != n:
-            txt += f" | đang hiện {shown}"
+            txt += f" | showing {shown}"
         self.lbl_counts.setText(txt)
 
-    def toggle_filter(self, kind):
-        self.filter_type = "" if self.filter_type == kind else kind
-        self._paint_filter()
+    def toggle_filter(self, kind=None):
+        """Cycle the Type filter: All -> Video -> Short -> All."""
+        order = ["", "video", "short"]
+        self.filter_type = order[(order.index(self.filter_type) + 1) % 3]
+        self._update_headers()
         self.refresh_table()
+
+    def on_cell_clicked(self, row, col):
+        if col != 1:
+            return
+        cell = self.nf_table.item(row, 1)
+        if cell is None:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(cell.text())
+        self.log(f"Copied title: {cell.text()}")
+
+    def on_search_changed(self, text):
+        self.search_text = unicodedata.normalize("NFC", text).strip().lower()
+        self.refresh_table()
+
+    def clear_table(self):
+        """Clear the table (in memory). Files on disk are left untouched."""
+        self.nf.clear()
+        self.err.clear()
+        self.loaded_dirs.clear()
+        self.nf_dirs = []
+        self.save_state()
+        self.refresh_table()
+        self.log("Table cleared (files on disk were not deleted).")
+
+    def on_header_clicked(self, col):
+        if col == 0:
+            self.toggle_filter()
+        elif col == 2:
+            self.toggle_sort("views")
+        elif col == 3:
+            self.toggle_sort("date")
+
+    def _update_headers(self):
+        arrow = " ▼" if self.sort_desc else " ▲"
+        type_txt = {"video": "Type: Video", "short": "Type: Short"}.get(self.filter_type, "Type")
+        labels = [
+            (type_txt, "Click to filter: All → Video → Short"),
+            ("Title", ""),
+            ("Views" + (arrow if self.sort_mode == "views" else ""), "Click to sort by views"),
+            ("Date" + (arrow if self.sort_mode == "date" else ""), "Click to sort by upload date"),
+            ("Actions", ""),
+        ]
+        for i, (text, tip) in enumerate(labels):
+            item = QTableWidgetItem(text)
+            item.setToolTip(tip)
+            self.nf_table.setHorizontalHeaderItem(i, item)
 
     def copy_link(self, item):
         vid = item["id"]
         if not vid:
-            self.log("⚠ Dòng này không có ID video nên không có link YouTube.")
+            self.log("⚠ This row has no video ID, so there is no YouTube link.")
             return
         link = f"https://www.youtube.com/watch?v={vid}"
         self.clipboard_clear()
         self.clipboard_append(link)
         self.update_idletasks()
-        self.log(f"Đã copy: {link}")
+        self.log(f"Copied: {link}")
 
     def refresh_counts_only(self):
-        shown = len(self.visible_items()) if self.filter_type else None
+        shown = len(self.visible_items()) if (self.filter_type or self.search_text) else None
         self.update_counts(shown)
 
     def apply_meta(self, key, upd: dict):
@@ -1009,22 +1073,23 @@ class App(QMainWindow):
             self.yt_stop()
             return
         if self.busy:
-            self.set_status("Đang quét YouTube, hãy đợi xong rồi bấm Load Metadata.")
+            self.set_status("A YouTube scan is running; wait for it to finish, then click Load Metadata.")
             return
         items = [it for it in self.nf.values() if it["id"]]
         skipped = len(self.nf) - len(items)
         if not items:
-            messagebox.showinfo("Không có dữ liệu",
-                                "Bảng chưa có dòng nào có ID video để tải metadata.")
+            messagebox.showinfo("No data",
+                                "The table has no rows with a video ID to load metadata for.")
             return
         if skipped:
-            self.log(f"Load Metadata: bỏ qua {skipped} dòng không có ID video.")
+            self.log(f"Load Metadata: skipped {skipped} rows without a video ID.")
         self.yt_stop_event.clear()
         self._set_busy(True)
         self.meta_running = True
         self._meta_applied = 0
         fg, hv = PALETTE["red"]
-        self.btn_meta.configure(text="■ Dừng", fg_color=fg, hover_color=hv)
+        self.btn_meta.configure(text="■ Stop", fg_color=fg, hover_color=hv)
+        self.btn_meta.setToolTip("Stop")
         threading.Thread(target=self.meta_worker, args=(list(items),), daemon=True).start()
 
     def meta_worker(self, items):
@@ -1048,7 +1113,7 @@ class App(QMainWindow):
                             info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}",
                                                     download=False)
                         except Exception as e:
-                            self.log(f"⚠ Không lấy được metadata {vid}: {str(e)[:90]}")
+                            self.log(f"⚠ Could not get metadata for {vid}: {str(e)[:90]}")
                     if is_short is None and info and info.get("duration"):
                         is_short = info["duration"] <= 60      # dự phòng khi không kiểm tra được
 
@@ -1073,20 +1138,21 @@ class App(QMainWindow):
                     if upd:
                         self.after(0, lambda k=it["key"], u=upd: self.apply_meta(k, u))
                     time.sleep(0.1)
-            stopped = " (đã dừng)" if self.yt_stop_event.is_set() else ""
-            msg = (f"Load Metadata xong{stopped}: đổi loại {cnt['type']}, bổ sung view {cnt['views']}, "
-                   f"bổ sung ngày đăng {cnt['date']}, lỗi {cnt['fail']}.")
+            stopped = " (stopped)" if self.yt_stop_event.is_set() else ""
+            msg = (f"Load Metadata done{stopped}: type changed {cnt['type']}, views added {cnt['views']}, "
+                   f"dates added {cnt['date']}, errors {cnt['fail']}.")
             self.log(msg)
             self.set_status(msg)
         except Exception as e:
-            self.log(f"⚠ Lỗi Load Metadata: {e}")
-            self.set_status("Lỗi Load Metadata")
+            self.log(f"⚠ Load Metadata error: {e}")
+            self.set_status("Load Metadata error")
         finally:
             def done():
                 self.flush_meta()
                 self.meta_running = False
                 fg, hv = PALETTE["purple"]
                 self.btn_meta.configure(text="⟳ Load Metadata", fg_color=fg, hover_color=hv)
+                self.btn_meta.setToolTip("Load Metadata")
                 self._set_busy(False)
             self.after(0, done)
 
@@ -1095,17 +1161,17 @@ class App(QMainWindow):
             return
         kw = self.yt_kw_var.get().strip()
         if not kw:
-            messagebox.showwarning("Thiếu từ khóa", "Nhập từ khóa YouTube trước.")
+            messagebox.showwarning("Missing keyword", "Enter a YouTube keyword first.")
             return
         try:
             min_v = int(re.sub(r"[,\.\s]", "", self.yt_views_var.get()))
             max_t = int(self.yt_max_var.get())
             scan = int(self.yt_scan_var.get())
         except ValueError:
-            messagebox.showerror("Lỗi", "View / số tiêu đề / quét tối đa phải là số.")
+            messagebox.showerror("Error", "Min views / max titles / max scan must be numbers.")
             return
         if max_t < 1 or scan < 1:
-            messagebox.showerror("Lỗi", "Số tiêu đề và quét tối đa phải ≥ 1.")
+            messagebox.showerror("Error", "Max titles and max scan must be ≥ 1.")
             return
 
         self.yt_stop_event.clear()
@@ -1131,7 +1197,7 @@ class App(QMainWindow):
 
     def yt_stop(self):
         self.yt_stop_event.set()
-        self.set_status("Đang dừng...")
+        self.set_status("Stopping...")
 
     def _append_line(self, line):
         content = self.txt_titles.get("1.0", "end-1c")
@@ -1187,14 +1253,14 @@ class App(QMainWindow):
                                 found += 1
                                 line = make_line(vid, title)
                                 self.after(0, lambda l=line: self._append_line(l))
-                    self.set_status(f"YouTube: quét {scanned} | đạt {found}/{max_t} "
-                                    f"| loại ngôn ngữ {skipped_lang}")
+                    self.set_status(f"YouTube: scanned {scanned} | matched {found}/{max_t} "
+                                    f"| language-filtered {skipped_lang}")
         except Exception as e:
-            self.log(f"⚠ Lỗi tìm YouTube: {e}")
-            self.set_status("Lỗi tìm YouTube")
+            self.log(f"⚠ YouTube search error: {e}")
+            self.set_status("YouTube search error")
         else:
-            msg = (f"YouTube xong: quét {scanned}, thêm {found} (≥ {min_v:,} view), "
-                   f"loại {skipped_lang} không phải tiếng Anh. Đã sắp xếp theo view.")
+            msg = (f"YouTube done: scanned {scanned}, added {found} (≥ {min_v:,} views), "
+                   f"excluded {skipped_lang} non-English. Sorted by views.")
             self.log(msg)
             self.set_status(msg)
         finally:
@@ -1223,26 +1289,26 @@ class App(QMainWindow):
         urls = [u for u in (chuan_hoa_base(l) for l in
                             self.txt_channels.get("1.0", "end").splitlines()) if u]
         if not urls:
-            messagebox.showwarning("Thiếu kênh", "Nhập ít nhất 1 link kênh / @handle.")
+            messagebox.showwarning("Missing channel", "Enter at least one channel link / @handle.")
             return
         try:
             limit = int(re.sub(r"[,\.\s]", "", self.ch_limit_var.get()))
             min_v = int(re.sub(r"[,\.\s]", "", self.ch_views_var.get()))
         except ValueError:
-            messagebox.showerror("Lỗi", "Giới hạn và view tối thiểu phải là số nguyên.")
+            messagebox.showerror("Error", "Limit and min views must be integers.")
             return
         if limit < 1:
-            messagebox.showerror("Lỗi", "Giới hạn phải ≥ 1.")
+            messagebox.showerror("Error", "Limit must be ≥ 1.")
             return
         tabs = [k for k, v in self.ch_tab_vars.items() if v.get()]
         if not tabs:
-            messagebox.showerror("Lỗi", "Chọn ít nhất 1 tab để quét.")
+            messagebox.showerror("Error", "Select at least one tab to scan.")
             return
         out_dir = Path(self.ch_dir_var.get().strip() or BASE_DIR)
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            messagebox.showerror("Lỗi", f"Không tạo được thư mục lưu: {e}")
+            messagebox.showerror("Error", f"Could not create output folder: {e}")
             return
 
         self.yt_stop_event.clear()
@@ -1278,7 +1344,7 @@ class App(QMainWindow):
                     name, found, scanned = self.scan_channel(
                         url, tabs, limit, min_v, sort_mode, detail, only_en)
                 except Exception as e:
-                    self.log(f"⚠ Lỗi kênh này: {e}")
+                    self.log(f"⚠ Error on this channel: {e}")
                     continue
 
                 names.append(name)
@@ -1290,9 +1356,9 @@ class App(QMainWindow):
                 path = folder / (ten_file_an_toan(name) + ".txt")
                 try:
                     write_lines(path, lines)
-                    self.log(f"Kênh '{name}': quét {scanned}, lưu {len(lines)} -> {path}")
+                    self.log(f"Channel '{name}': scanned {scanned}, saved {len(lines)} -> {path}")
                 except OSError as e:
-                    self.log(f"⚠ Không ghi được {path}: {e}")
+                    self.log(f"⚠ Could not write {path}: {e}")
                 total_saved += len(lines)
 
                 # đưa vào danh sách chính để kiểm tra TikTok (bỏ trùng)
@@ -1311,14 +1377,14 @@ class App(QMainWindow):
             elif names:
                 self.source_name = "nhieu_kenh"
 
-            msg = (f"Quét kênh xong: {len(names)} kênh, lưu {total_saved} dòng, "
-                   f"thêm {total_added} vào danh sách."
-                   + (" (đã dừng)" if self.yt_stop_event.is_set() else ""))
+            msg = (f"Channel scan done: {len(names)} channels, saved {total_saved} rows, "
+                   f"added {total_added} to the list."
+                   + (" (stopped)" if self.yt_stop_event.is_set() else ""))
             self.log(msg)
             self.set_status(msg)
         except Exception as e:
-            self.log(f"⚠ Lỗi quét kênh: {e}")
-            self.set_status("Lỗi quét kênh")
+            self.log(f"⚠ Channel scan error: {e}")
+            self.set_status("Channel scan error")
         finally:
             def done():
                 if sort_mode == CH_SORTS[0]:
@@ -1347,13 +1413,13 @@ class App(QMainWindow):
                 try:
                     info = ydl.extract_info(f"{base_url}/{tab}", download=False)
                 except Exception as e:
-                    self.log(f"   Bỏ qua tab (không có hoặc lỗi): {str(e)[:100]}")
+                    self.log(f"   Skipping tab (missing or error): {str(e)[:100]}")
                     continue
 
                 if not name:
                     name = info.get("channel") or info.get("uploader") or info.get("title") or "kenh"
                     name = re.sub(r"\s*-\s*(Videos|Shorts|Live)$", "", name)
-                    self.log(f"Kênh: {name}")
+                    self.log(f"Channel: {name}")
 
                 tab_scanned = 0
                 for e in info.get("entries") or []:
@@ -1392,8 +1458,8 @@ class App(QMainWindow):
                             break
 
                     if tab_scanned % 25 == 0:
-                        self.set_status(f"Kênh {name}: tab {CH_TABS[tab]} quét {tab_scanned} | "
-                                        f"đạt {len(found)} | loại ngôn ngữ {skipped_lang}")
+                        self.set_status(f"Channel {name}: tab {CH_TABS[tab]} scanned {tab_scanned} | "
+                                        f"matched {len(found)} | language-filtered {skipped_lang}")
 
         if sort_mode == CH_SORTS[0]:
             found.sort(key=lambda x: x["views"], reverse=True)
@@ -1406,7 +1472,7 @@ class App(QMainWindow):
         for f in found[:10]:
             self.log(f"   {f['views']:,} | {f['type']} | {f['title']}")
         if len(found) > 10:
-            self.log(f"   ... (còn {len(found) - 10} dòng nữa)")
+            self.log(f"   ... ({len(found) - 10} more rows)")
         return name or "kenh", found, scanned
 
     def start(self):
@@ -1414,10 +1480,10 @@ class App(QMainWindow):
         lines = list(dict.fromkeys(lines))
         lines = self.sort_lines_by_views(lines)  # kiểm tra video view cao trước
         if not lines:
-            messagebox.showwarning("Thiếu dữ liệu", "Hãy nhập ít nhất 1 tiêu đề.")
+            messagebox.showwarning("Missing data", "Enter at least one title.")
             return
         if not launch_chrome():
-            messagebox.showerror("Lỗi", "Không mở được Chrome ở chế độ debug.")
+            messagebox.showerror("Error", "Could not open Chrome in debug mode.")
             return
 
         # mỗi dòng thuộc 1 kênh/từ khóa -> nạp thư mục kênh đó để ghi đúng chỗ, không mất dữ liệu cũ
@@ -1437,7 +1503,7 @@ class App(QMainWindow):
                 self.register_dir(d)
         self.refresh_table()
         for s in srcs:
-            self.log(f"Kết quả của '{s}' sẽ lưu trong thư mục: {self.dir_for(s)}")
+            self.log(f"Results for '{s}' will be saved in folder: {self.dir_for(s)}")
 
         self.stop_event.clear()
         self.btn_start.configure(state="disabled")
@@ -1448,7 +1514,7 @@ class App(QMainWindow):
 
     def stop(self):
         self.stop_event.set()
-        self.set_status("Đang dừng...")
+        self.set_status("Stopping...")
 
     def finish(self):
         self.after(0, lambda: (self.btn_start.configure(state="normal"),
@@ -1497,29 +1563,29 @@ class App(QMainWindow):
                     m = self.meta.get(item_key(vid, title), {})
                     src = m.get("src") or default_src
                     v = m.get("views")
-                    vtxt = f" ({v:,} view)" if isinstance(v, int) else ""
-                    self.set_status(f"[{i}/{total}] Đang tìm: {title}{vtxt}")
+                    vtxt = f" ({v:,} views)" if isinstance(v, int) else ""
+                    self.set_status(f"[{i}/{total}] Searching: {title}{vtxt}")
 
                     failed = captcha = False
                     try:
                         captions, captcha = self.search(page, title)
                     except Exception as e:
-                        self.log(f"⚠ Lỗi khi tìm '{title}': {e}")
+                        self.log(f"⚠ Error while searching '{title}': {e}")
                         captions, failed = [], True
                     if self.stop_event.is_set():
                         break
 
                     captions = captions[:self.top_n]  # chỉ xét N kết quả đầu
                     if failed or not captions:
-                        why = "lỗi" if failed else ("captcha" if captcha else "không có kết quả")
+                        why = "error" if failed else ("captcha" if captcha else "no results")
                         self.log(f"[{i}/{total}] ⚠ {why} -> error.txt: {title}")
                         result = "error"
                         err_count += 1
                     elif any(is_match(title, c, self.max_extra, strip_tag) for c in captions):
-                        self.log(f"[{i}/{total}] ✓ Có: {title}")
+                        self.log(f"[{i}/{total}] ✓ Found: {title}")
                         result = "found"
                     else:
-                        self.log(f"[{i}/{total}] ✗ Không khớp top {len(captions)}: {title}")
+                        self.log(f"[{i}/{total}] ✗ No match in top {len(captions)}: {title}")
                         result = "notfound"
                         nf_count += 1
                     self.after(0, lambda v=vid, t=title, s=src, r=result:
@@ -1534,12 +1600,12 @@ class App(QMainWindow):
                     page.close()  # chỉ đóng tab của tool, không đóng Chrome
                 except Exception:
                     pass
-            self.set_status("Đã dừng." if self.stop_event.is_set()
-                            else f"Xong. Không tìm thấy: {nf_count} | lỗi/captcha: {err_count} "
-                                 f"(tổng {len(lines)})")
+            self.set_status("Stopped." if self.stop_event.is_set()
+                            else f"Done. Not found: {nf_count} | errors/captcha: {err_count} "
+                                 f"(total {len(lines)})")
         except Exception as e:
-            self.log(f"Lỗi nghiêm trọng: {e}")
-            self.set_status("Lỗi")
+            self.log(f"Fatal error: {e}")
+            self.set_status("Error")
         finally:
             self.finish()
 
@@ -1575,7 +1641,7 @@ class App(QMainWindow):
                 if page.query_selector("#captcha_container, .captcha_verify_container, [id*='captcha']"):
                     captcha_seen = True
                     if not warned:
-                        self.log("⚠ TikTok yêu cầu captcha — hãy giải trong cửa sổ Chrome...")
+                        self.log("⚠ TikTok requires a captcha — solve it in the Chrome window...")
                         page.bring_to_front()
                         warned = True
                     deadline = time.time() + 8  # gia hạn trong lúc giải captcha
