@@ -1,6 +1,6 @@
 
 import os, re, json, time, socket, itertools, threading, subprocess, unicodedata
-import urllib.request, urllib.error
+import urllib.request, urllib.error, webbrowser
 from datetime import datetime, timezone
 from urllib.parse import quote
 from pathlib import Path
@@ -69,8 +69,8 @@ il lo gli di che per con una sono non anche come
 """.split())
 
 def parse_line(line: str):
-    """Trả về (video_id | None, title)."""
-    line = line.strip()
+    """Trả về (video_id | None, title). Bỏ phần metadata sau TAB (#id|tiêu đề<TAB>t=..;v=..)."""
+    line = line.split("\t", 1)[0].strip()
     m = LINE_RE.match(line)
     if m:
         return m.group(1), m.group(2).strip()
@@ -365,6 +365,42 @@ filedialog = FileDialogs
 
 
 
+class DropTextEdit(QTextEdit):
+    """QTextEdit mặc định tự nuốt file kéo vào (chèn đường dẫn dạng text) nên
+    cửa sổ chính không nhận được sự kiện drop. Lớp này bắt file và phát signal."""
+    files_dropped = Signal(list)
+
+    @staticmethod
+    def _files(md):
+        return [u.toLocalFile() for u in md.urls() if u.isLocalFile()] if md.hasUrls() else []
+
+    def canInsertFromMimeData(self, source):
+        return bool(self._files(source)) or super().canInsertFromMimeData(source)
+
+    def insertFromMimeData(self, source):
+        files = self._files(source)
+        if files:
+            self.files_dropped.emit(files)
+        else:
+            super().insertFromMimeData(source)
+
+    def dragEnterEvent(self, e):
+        if self._files(e.mimeData()): e.acceptProposedAction()
+        else: super().dragEnterEvent(e)
+
+    def dragMoveEvent(self, e):
+        if self._files(e.mimeData()): e.acceptProposedAction()
+        else: super().dragMoveEvent(e)
+
+    def dropEvent(self, e):
+        files = self._files(e.mimeData())
+        if files:
+            e.acceptProposedAction()
+            self.files_dropped.emit(files)
+        else:
+            super().dropEvent(e)
+
+
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -511,7 +547,7 @@ class App(QMainWindow):
         list_panel = QFrame(); list_panel.setObjectName("panel")
         lp = QVBoxLayout(list_panel); lp.setContentsMargins(10,9,10,9); lp.setSpacing(7)
         title = QLabel("Titles to search on TikTok"); title.setObjectName("sectionTitle"); lp.addWidget(title)
-        self.title_edit = QTextEdit(); self.title_edit.setPlaceholderText("One title per line, or #video_id|title")
+        self.title_edit = DropTextEdit(); self.title_edit.files_dropped.connect(self.load_list_paths); self.title_edit.setPlaceholderText("One title per line, or #video_id|title")
         self.title_edit.setAcceptRichText(False); lp.addWidget(self.title_edit, 1)
         self.txt_titles = TextAdapter(self.title_edit)
         bl = QHBoxLayout()
@@ -568,7 +604,7 @@ class App(QMainWindow):
         log_panel = QFrame(); log_panel.setObjectName("panel")
         log_l = QVBoxLayout(log_panel); log_l.setContentsMargins(10,8,10,8)
         log_title = QLabel("Log"); log_title.setObjectName("sectionTitle"); log_l.addWidget(log_title)
-        self.log_edit = QTextEdit(); self.log_edit.setReadOnly(True); self.log_edit.setMaximumHeight(150)
+        self.log_edit = DropTextEdit(); self.log_edit.files_dropped.connect(self.load_list_paths); self.log_edit.setReadOnly(True); self.log_edit.setMaximumHeight(150)
         log_l.addWidget(self.log_edit)
         self.txt_log = TextAdapter(self.log_edit)
         rl.addWidget(log_panel, 1)
@@ -611,7 +647,7 @@ class App(QMainWindow):
     def _build_channel_tab(self):
         page = QWidget(); grid = QGridLayout(page); grid.setContentsMargins(10,10,10,10); grid.setHorizontalSpacing(8); grid.setVerticalSpacing(6)
         grid.addWidget(QLabel("Channel link / @handle (one per line):"),0,0,1,4)
-        self.channels_edit = QTextEdit(); self.channels_edit.setMaximumHeight(65); self.channels_edit.setPlaceholderText("https://www.youtube.com/@channel")
+        self.channels_edit = DropTextEdit(); self.channels_edit.files_dropped.connect(self.load_list_paths); self.channels_edit.setMaximumHeight(65); self.channels_edit.setPlaceholderText("https://www.youtube.com/@channel")
         grid.addWidget(self.channels_edit,1,0,1,4); self.txt_channels = TextAdapter(self.channels_edit)
         self.ch_limit = QLineEdit("200"); self.ch_views = QLineEdit("500000")
         self.ch_limit.textChanged.connect(self.ch_limit_var.set)
@@ -692,6 +728,7 @@ class App(QMainWindow):
             copy=self._button("Copy",lambda _,item=it:self.copy_link(item),"#2563EB")
             ok=self._button("✓",lambda _,item=it:self.set_item_status(item,"ok"),"#16A34A")
             bad=self._button("✕",lambda _,item=it:self.set_item_status(item,"bad"),"#DC4545")
+            copy.setToolTip("Copy link, open YouTube + TikTok search tabs")
             copy.setFixedWidth(58); ok.setFixedWidth(42); bad.setFixedWidth(42)
             for _b in (copy, ok, bad): _b.setFixedHeight(32)
             al.addWidget(copy); al.addWidget(ok); al.addWidget(bad)
@@ -1044,7 +1081,13 @@ class App(QMainWindow):
         self.clipboard_clear()
         self.clipboard_append(link)
         self.update_idletasks()
-        self.log(f"Copied: {link}")
+        tiktok = f"https://www.tiktok.com/search/video?q={quote(item['title'])}"
+        self.log(f"Copied + opened YouTube & TikTok search: {link}")
+        try:
+            webbrowser.open_new_tab(link)
+            webbrowser.open_new_tab(tiktok)
+        except Exception as e:
+            self.log(f"⚠ Could not open browser: {e}")
 
     def refresh_counts_only(self):
         shown = len(self.visible_items()) if (self.filter_type or self.search_text) else None
@@ -1476,7 +1519,15 @@ class App(QMainWindow):
         return name or "kenh", found, scanned
 
     def start(self):
-        lines = [t.strip() for t in self.txt_titles.get("1.0", "end").splitlines() if t.strip()]
+        lines = []
+        for t in self.txt_titles.get("1.0", "end").splitlines():
+            r = parse_file_line(t)
+            if not r or not r[1]:
+                continue
+            vid, title, m = r
+            if m:
+                self.meta.setdefault(item_key(vid, title), {}).update(m)
+            lines.append(make_line(vid, title))   # chỉ giữ #id|tiêu đề, bỏ metadata
         lines = list(dict.fromkeys(lines))
         lines = self.sort_lines_by_views(lines)  # kiểm tra video view cao trước
         if not lines:
