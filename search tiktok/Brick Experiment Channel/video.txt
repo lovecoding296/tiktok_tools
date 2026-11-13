@@ -1,19 +1,19 @@
-#pwglOlD7e0M|Making Lego Car CROSS Gaps	t=video;v=118264939;d=20211120;c=Brick Experiment Channel
-#MwHHErfX9hI|Making Lego Car CLIMB Obstacles	t=video;v=100847724;d=20210102;c=Brick Experiment Channel
-#UQsEGUUuCCY|6 Lego Vehicles vs 6 Obstacles	t=video;v=91515735;d=20240511;c=Brick Experiment Channel
-#G7Tou1MzmLI|Creating a BIG Vortex with Lego Motors	t=video;v=75344521;d=20200905;c=Brick Experiment Channel
-#O7BrA6mvvPk|5 Lego Walkers vs 7 Obstacles	t=video;v=74584662;d=20250412;c=Brick Experiment Channel
-#fPvHJJ9CzcA|Making Lego Car CROSS Narrow Bridges	t=video;v=65875591;d=20241116;c=Brick Experiment Channel
-#sL37JqysXSI|5 Lego Tracked Vehicles vs 6 Obstacles	t=video;v=59342774;d=20251101;c=Brick Experiment Channel
-#M1-YeqGynlw|20 Mechanical Principles combined in a Useless Lego Machine	t=video;v=56236903;d=20220917;c=Brick Experiment Channel
-#QwXK4e4uqXY|Making a GOOGOL:1 Reduction with Lego Gears	t=video;v=42775240;d=20200516;c=Brick Experiment Channel
-#RsuD6iC-Foc|200 Wheel Lego Vehicle	t=video;v=41733158;d=20231216;c=Brick Experiment Channel
-#tRc2XGEHiGo|Requested Lego Experiments 4	t=video;v=41202542;d=20220212;c=Brick Experiment Channel
-#NAThvwGJJoI|Making the Longest 1:1 Lego Gear Train	t=video;v=41199279;d=20210306;c=Brick Experiment Channel
-#uirPtj6zGAw|100 Wheel Lego Vehicle	t=video;v=40926726;d=20191012;c=Brick Experiment Channel
-#PzkriutiChE|Shredding Paper with Lego Gears (ver 2)	t=video;v=39371904;d=20241012;c=Brick Experiment Channel
-#jRn5waE0qfk|Can Lego BREAK a Steel Axle?	t=video;v=34531926;d=20200314;c=Brick Experiment Channel
-#wUVvQk7XLd4|Making a Drone with Lego Motors and Propellers	t=video;v=33630617;d=20200111;c=Brick Experiment Channel
+#pwglOlD7e0M|Making Lego Car CROSS Gaps	t=video;v=118264939;d=20211120;s=bad;c=Brick Experiment Channel
+#MwHHErfX9hI|Making Lego Car CLIMB Obstacles	t=video;v=100847724;d=20210102;s=bad;c=Brick Experiment Channel
+#UQsEGUUuCCY|6 Lego Vehicles vs 6 Obstacles	t=video;v=91515735;d=20240511;s=bad;c=Brick Experiment Channel
+#G7Tou1MzmLI|Creating a BIG Vortex with Lego Motors	t=video;v=75344521;d=20200905;s=bad;c=Brick Experiment Channel
+#O7BrA6mvvPk|5 Lego Walkers vs 7 Obstacles	t=video;v=74584662;d=20250412;s=bad;c=Brick Experiment Channel
+#fPvHJJ9CzcA|Making Lego Car CROSS Narrow Bridges	t=video;v=65875591;d=20241116;s=bad;c=Brick Experiment Channel
+#sL37JqysXSI|5 Lego Tracked Vehicles vs 6 Obstacles	t=video;v=59342774;d=20251101;s=bad;c=Brick Experiment Channel
+#M1-YeqGynlw|20 Mechanical Principles combined in a Useless Lego Machine	t=video;v=56236903;d=20220917;s=bad;c=Brick Experiment Channel
+#QwXK4e4uqXY|Making a GOOGOL:1 Reduction with Lego Gears	t=video;v=42775240;d=20200516;s=bad;c=Brick Experiment Channel
+#RsuD6iC-Foc|200 Wheel Lego Vehicle	t=video;v=41733158;d=20231216;s=bad;c=Brick Experiment Channel
+#tRc2XGEHiGo|Requested Lego Experiments 4	t=video;v=41202542;d=20220212;s=bad;c=Brick Experiment Channel
+#NAThvwGJJoI|Making the Longest 1:1 Lego Gear Train	t=video;v=41199279;d=20210306;s=bad;c=Brick Experiment Channel
+#uirPtj6zGAw|100 Wheel Lego Vehicle	t=video;v=40926726;d=20191012;s=bad;c=Brick Experiment Channel
+#PzkriutiChE|Shredding Paper with Lego Gears (ver 2)	t=video;v=39371904;d=20241012;s=bad;c=Brick Experiment Channel
+#jRn5waE0qfk|Can Lego BREAK a Steel Axle?	t=video;v=34531926;d=20200314;s=bad;c=Brick Experiment Channel
+#wUVvQk7XLd4|Making a Drone with Lego Motors and Propellers	t=video;v=33630617;d=20200111;s=bad;c=Brick Experiment Channel
 #KLEH8RJsYgI|Building a Lego-powered Submarine 4.0 - automatic depth control	t=video;v=32935674;d=20220716;c=Brick Experiment Channel
 #n83cSg3wohU|Building a Lego-powered Submarine 3.0 - balloon and compressor	t=video;v=28363284;d=20210911;c=Brick Experiment Channel
 #MdfUSNzc0Xk|Building a Lego-powered Submarine 2.0 - magnetic couplings	t=video;v=25255419;d=20200630;c=Brick Experiment Channel
@@ -36,7 +36,7 @@
 #zJ3TABb1MRY|Spinning a Lego Wheel FAST	t=video;v=12267041;d=20180714;c=Brick Experiment Channel
 #bKKBBrQohLk|Build & Test Lego Engines: V8, U12, H16, X24, multirow-radial-42, S100	t=video;v=11579809;d=20210612;c=Brick Experiment Channel
 #BPjiJA_eKSw|Spinning Mini-Camera and Lego Benny	t=video;v=11529499;d=20201024;c=Brick Experiment Channel
-#MzmbooQJ9ko|3 Pole Climbing Lego Robots	t=video;v=10221566;d=20210710;c=Brick Experiment Channel
+#MzmbooQJ9ko|3 Pole Climbing Lego Robots	t=video;v=10221566;d=20210710;s=ok;c=Brick Experiment Channel
 #DLxw6x9lTwM|Building and Testing a Lego Press	t=video;v=10324883;d=20181103;c=Brick Experiment Channel
 #jpJIhxE1iQk|Testing a Lego-compatible Steel Axle	t=video;v=9736058;d=20190202;c=Brick Experiment Channel
 #mSfHTeKl11c|How Many Walls Stops A Lego Cannon?	t=video;v=9434712;d=20220129;c=Brick Experiment Channel

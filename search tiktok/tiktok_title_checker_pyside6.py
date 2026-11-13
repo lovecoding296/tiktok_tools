@@ -716,11 +716,12 @@ class App(QMainWindow):
                 cell.setBackground(QColor(bg))
                 self.nf_table.setItem(row,col,cell)
             actions=QWidget(); actions.setObjectName("cell"); al=QHBoxLayout(actions); al.setContentsMargins(3,2,3,2); al.setSpacing(4)
-            copy=self._button("Copy",lambda _,item=it:self.copy_link(item),"#2563EB")
+            copy=self._button("🔗",lambda _,item=it:self.open_link(item),"#2563EB")
             ok=self._button("✓",lambda _,item=it:self.set_item_status(item,"ok"),"#16A34A")
-            bad=self._button("✕",lambda _,item=it:self.set_item_status(item,"bad"),"#DC4545")
-            copy.setToolTip("Copy link, open YouTube + TikTok search tabs")
-            copy.setFixedWidth(58); ok.setFixedWidth(42); bad.setFixedWidth(42)
+            bad=self._button("✕",lambda _,item=it:self.delete_item(item),"#DC4545")
+            copy.setToolTip("Open YouTube + TikTok search tabs")
+            bad.setToolTip("Delete this row (also removes it from the file)")
+            copy.setFixedWidth(42); ok.setFixedWidth(42); bad.setFixedWidth(42)
             for _b in (copy, ok, bad): _b.setFixedHeight(32)
             al.addWidget(copy); al.addWidget(ok); al.addWidget(bad)
             self.nf_table.setCellWidget(row,4,actions)
@@ -745,6 +746,25 @@ class App(QMainWindow):
 
     def _paint_filter(self):
         self._update_headers()
+
+    def delete_item(self, item):
+        """Xóa hàng khỏi bảng và ghi lại file video.txt / short.txt / error.txt của kênh."""
+        title = item["title"]
+        shown = title if len(title) <= 120 else title[:117] + "..."
+        ans = QMessageBox.question(
+            self, "Confirm delete",
+            f"Delete this row? It will also be removed from the file.\n\n{shown}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        key = item["key"]
+        self.nf.pop(key, None)
+        self.err.pop(key, None)
+        self.meta.pop(key, None)
+        self.save_src(item["src"])
+        self.refresh_table()
+        self.log(f"Deleted row: {item['title']}")
 
     def set_item_status(self, item, st):
         new="" if item["status"]==st else st
@@ -1059,17 +1079,14 @@ class App(QMainWindow):
             item.setToolTip(tip)
             self.nf_table.setHorizontalHeaderItem(i, item)
 
-    def copy_link(self, item):
+    def open_link(self, item):
         vid = item["id"]
         if not vid:
             self.log("⚠ This row has no video ID, so there is no YouTube link.")
             return
         link = f"https://www.youtube.com/watch?v={vid}"
-        self.clipboard_clear()
-        self.clipboard_append(link)
-        self.update_idletasks()
         tiktok = f"https://www.tiktok.com/search/video?q={quote(item['title'])}"
-        self.log(f"Copied + opened YouTube & TikTok search: {link}")
+        self.log(f"Opened YouTube & TikTok search: {link}")
         try:
             webbrowser.open_new_tab(link)
             webbrowser.open_new_tab(tiktok)
