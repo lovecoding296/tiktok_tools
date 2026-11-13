@@ -1,7 +1,10 @@
-# pip install requests send2trash
+# pip install requests send2trash PyQt6
 import os, re, csv, io, json, time, shutil, threading, queue, mimetypes, requests
-import tkinter as tk
-from tkinter import filedialog, scrolledtext, messagebox, ttk
+import sys
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
+                             QPushButton, QSpinBox, QTabWidget, QScrollArea, QPlainTextEdit, QMessageBox, QFileDialog)
 from concurrent.futures import ThreadPoolExecutor
 from urllib3.fields import RequestField
 from urllib3.filepost import choose_boundary
@@ -119,14 +122,6 @@ def save_state():
 
 def save_config():
     return write_json(CONFIG_FILE, dict(cfg))
-
-def pump_log():
-    while not logq.empty():
-        txt.insert(tk.END, logq.get() + "\n"); txt.see(tk.END)
-    if sheet_dirty[0]:
-        sheet_dirty[0] = False
-        build_sheet_table()
-    win.after(200, pump_log)
 
 def clean_ip(s):
     return re.sub(r"^https?://", "", s.strip()).strip("/")
@@ -780,214 +775,210 @@ def do_retry():
 def run(fn):
     threading.Thread(target=fn, daemon=True).start()
 
+def pump_log():
+    """Chạy trên luồng GUI mỗi 200ms: đổ log từ queue ra ô log, vẽ lại bảng sheet nếu luồng nền đã đọc xong."""
+    msgs = []
+    while not logq.empty():
+        msgs.append(logq.get())
+    if msgs:
+        txt.appendPlainText("\n".join(msgs))
+        sb = txt.verticalScrollBar()
+        sb.setValue(sb.maximum())
+    if sheet_dirty[0]:
+        sheet_dirty[0] = False
+        build_sheet_table()
+
 def confirm_run(fn, action):
     """Bấm DỌN / CHUYỂN: hỏi lại đường dẫn, chọn Có mới bắt đầu chạy."""
-    r = root_var.get().strip() or "(chưa chọn)"
-    c = src_var.get().strip() or "(chưa chọn)"
-    ok = messagebox.askyesno("Xác nhận đường dẫn",
-                             f"Folder xây kênh:\n{r}\n\nFolder đã cut xong:\n{c}\n\nĐúng đường dẫn chưa? Bắt đầu {action}?",
-                             icon="question", default="no")
-    if ok:
+    r = root_edit.text().strip() or "(chưa chọn)"
+    c = src_edit.text().strip() or "(chưa chọn)"
+    box = QMessageBox(win)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setWindowTitle("Xác nhận đường dẫn")
+    box.setText(f"Folder xây kênh:\n{r}\n\nFolder đã cut xong:\n{c}\n\nĐúng đường dẫn chưa? Bắt đầu {action}?")
+    yes = box.addButton("Có", QMessageBox.ButtonRole.YesRole)
+    no = box.addButton("Không", QMessageBox.ButtonRole.NoRole)
+    box.setDefaultButton(no)
+    box.exec()
+    if box.clickedButton() is yes:
         run(fn)
 
-# ===== GUI =====
-win = tk.Tk(); win.title("VLC iPhone Sender"); win.geometry("900x620")
+# ===== GUI (PyQt6) =====
+GRAY = "color:#777;"
+BOLD = "font-weight:bold;"
 
-_save_job = [None]
+class MainWindow(QWidget):
+    def closeEvent(self, ev):
+        apply_counts()
+        save_config()
+        save_state()
+        ev.accept()
+
+app = QApplication(sys.argv)
+app.setStyleSheet("""
+QLineEdit { background: white; color: #212529; border: 1px solid #ced4da; padding: 2px 6px; selection-background-color: #86b7fe; }
+QLineEdit:focus { border: 2px solid #86b7fe; padding: 1px 5px; }
+""")
+
+win = MainWindow()
+win.setWindowTitle("VLC iPhone Sender")
+win.resize(900, 620)
+lay = QVBoxLayout(win)
+lay.setContentsMargins(8, 6, 8, 6)
+
+# --- tự lưu config.json sau 0.5s kể từ lần sửa cuối; áp số máy / số video sau 0.6s ---
+save_timer = QTimer(win)
+save_timer.setSingleShot(True)
+save_timer.setInterval(500)
+save_timer.timeout.connect(save_config)
+
 def schedule_save():
-    """Lưu config.json sau 0.5s kể từ lần sửa cuối (gõ IP xong là tự lưu)."""
-    if _save_job[0]:
-        win.after_cancel(_save_job[0])
-    _save_job[0] = win.after(500, save_config)
+    save_timer.start()           # start() khi đang chạy = đếm lại từ đầu
 
-# --- folder xây kênh ---
-root_var = tk.StringVar(value=cfg["root"])
-def on_root_change(*_):
-    cfg["root"] = root_var.get()
+apply_timer = QTimer(win)
+apply_timer.setSingleShot(True)
+apply_timer.setInterval(600)
+
+def schedule_apply(*_):
+    apply_timer.start()
+
+# --- folder xây kênh / folder đã cut xong ---
+def on_root_change(text):
+    cfg["root"] = text
     schedule_save()
-root_var.trace_add("write", on_root_change)
+
+def on_src_change(text):
+    cfg["source"] = text
+    schedule_save()
 
 def pick_root():
-    p = filedialog.askdirectory(initialdir=root_var.get() or None)
+    p = QFileDialog.getExistingDirectory(win, "Chọn folder xây kênh", root_edit.text() or "")
     if not p:
         return
-    if same_path(p, src_var.get()):
-        messagebox.showwarning("Trùng folder", "Folder xây kênh không được trùng với folder đã cut xong.")
+    if same_path(p, src_edit.text()):
+        QMessageBox.warning(win, "Trùng folder", "Folder xây kênh không được trùng với folder đã cut xong.")
         return
-    if not same_parent(p, src_var.get()):
-        messagebox.showwarning("Khác folder cha", "Folder xây kênh và folder đã cut xong phải nằm chung 1 folder cha.")
+    if not same_parent(p, src_edit.text()):
+        QMessageBox.warning(win, "Khác folder cha", "Folder xây kênh và folder đã cut xong phải nằm chung 1 folder cha.")
         return
-    root_var.set(p)
+    root_edit.setText(p)
 
 def pick_src():
-    p = filedialog.askdirectory(initialdir=src_var.get() or None)
+    p = QFileDialog.getExistingDirectory(win, "Chọn folder đã cut xong", src_edit.text() or "")
     if not p:
         return
-    if same_path(p, root_var.get()):
-        messagebox.showwarning("Trùng folder", "Folder đã cut xong không được trùng với folder xây kênh.")
+    if same_path(p, root_edit.text()):
+        QMessageBox.warning(win, "Trùng folder", "Folder đã cut xong không được trùng với folder xây kênh.")
         return
-    if not same_parent(p, root_var.get()):
-        messagebox.showwarning("Khác folder cha", "Folder đã cut xong và folder xây kênh phải nằm chung 1 folder cha.")
+    if not same_parent(p, root_edit.text()):
+        QMessageBox.warning(win, "Khác folder cha", "Folder đã cut xong và folder xây kênh phải nằm chung 1 folder cha.")
         return
-    src_var.set(p)
+    src_edit.setText(p)
 
-top = tk.Frame(win); top.pack(fill="x", padx=8, pady=(6, 2))
-tk.Label(top, text="Folder xây kênh:", width=19, anchor="w").pack(side="left")
-tk.Entry(top, textvariable=root_var).pack(side="left", fill="x", expand=True)
-tk.Button(top, text="Chọn folder xây kênh", width=24, command=pick_root).pack(side="left", padx=4)
+def path_row(label, btn_text, value, on_pick):
+    row = QHBoxLayout()
+    lb = QLabel(label); lb.setFixedWidth(130)
+    ed = QLineEdit(value)
+    btn = QPushButton(btn_text); btn.setMinimumWidth(180)
+    btn.clicked.connect(lambda: on_pick())
+    row.addWidget(lb); row.addWidget(ed, 1); row.addWidget(btn)
+    return row, ed
 
-# --- folder đã cut xong (lấy folder bù khi xoá folder rỗng) ---
-src_var = tk.StringVar(value=cfg["source"])
-def on_src_change(*_):
-    cfg["source"] = src_var.get()
-    schedule_save()
-src_var.trace_add("write", on_src_change)
+row_root, root_edit = path_row("Folder xây kênh:", "Chọn folder xây kênh", cfg["root"], pick_root)
+row_src, src_edit = path_row("Folder đã cut xong:", "Chọn folder đã cut xong", cfg["source"], pick_src)
+root_edit.textChanged.connect(on_root_change)
+src_edit.textChanged.connect(on_src_change)
+lay.addLayout(row_root)
+lay.addLayout(row_src)
 
-srcf = tk.Frame(win); srcf.pack(fill="x", padx=8, pady=(0, 6))
-tk.Label(srcf, text="Folder đã cut xong:", width=19, anchor="w").pack(side="left")
-tk.Entry(srcf, textvariable=src_var).pack(side="left", fill="x", expand=True)
-tk.Button(srcf, text="Chọn folder đã cut xong", width=24, command=pick_src).pack(side="left", padx=4)
+# --- khung cuộn dùng chung cho bảng IP và bảng sheet ---
+def make_scroll():
+    sc = QScrollArea()
+    sc.setWidgetResizable(True)
+    return sc
 
-# --- cấu hình số máy / số video mỗi folder ---
-nm_var = tk.StringVar(value=str(cfg["num_machines"]))
-pf_var = tk.StringVar(value=str(cfg["per_folder"]))
-ip_vars = []
-_apply_job = [None]
+def set_scroll_content(sc, inner, min_h=40, max_h=300):
+    sc.setWidget(inner)                                  # widget cũ tự bị xoá
+    sc.setFixedHeight(min(max(inner.sizeHint().height() + 4, min_h), max_h))
+    sc.verticalScrollBar().setValue(0)
+
+# --- tab ---
+tabs = QTabWidget()
+tab_main = QWidget()
+tab_setup = QWidget()
+tabs.addTab(tab_main, "Chính")
+tabs.addTab(tab_setup, "Setup kênh")
+lay.addWidget(tabs)
+
+# --- tab Chính: số máy / số video mỗi folder / IP từng máy ---
+ip_edits = []
 
 def apply_counts():
-    n = to_int(nm_var.get(), cfg["num_machines"], 1, MAX_MACHINES) if nm_var.get().strip().isdigit() else None
-    p = to_int(pf_var.get(), cfg["per_folder"], 1, MAX_PER_FOLDER) if pf_var.get().strip().isdigit() else None
+    n = nm_spin.value()
+    p = pf_spin.value()
     rebuild = False
-    if n is not None and n != cfg["num_machines"]:
+    if n != cfg["num_machines"]:
         cfg["num_machines"] = n
         rebuild = True
-    if p is not None:
-        cfg["per_folder"] = p
+    cfg["per_folder"] = p
     if rebuild:
         build_ip_grid()
         build_sheet_table()
     schedule_save()
 
-def schedule_apply(*_):
-    if _apply_job[0]:
-        win.after_cancel(_apply_job[0])
-    _apply_job[0] = win.after(600, apply_counts)
+apply_timer.timeout.connect(apply_counts)
 
-nm_var.trace_add("write", schedule_apply)
-pf_var.trace_add("write", schedule_apply)
+main_lay = QVBoxLayout(tab_main)
+main_lay.setContentsMargins(4, 4, 4, 4)
+conf = QHBoxLayout()
+nm_spin = QSpinBox(); nm_spin.setRange(1, MAX_MACHINES); nm_spin.setValue(cfg["num_machines"]); nm_spin.setFixedWidth(70)
+pf_spin = QSpinBox(); pf_spin.setRange(1, MAX_PER_FOLDER); pf_spin.setValue(cfg["per_folder"]); pf_spin.setFixedWidth(70)
+nm_spin.valueChanged.connect(schedule_apply)
+pf_spin.valueChanged.connect(schedule_apply)
+note_lb = QLabel("(tự lưu vào config.json)"); note_lb.setStyleSheet(GRAY)
+conf.addWidget(QLabel("Số máy (IP):")); conf.addWidget(nm_spin); conf.addSpacing(16)
+conf.addWidget(QLabel("Số video / folder:")); conf.addWidget(pf_spin); conf.addSpacing(12)
+conf.addWidget(note_lb); conf.addStretch(1)
+main_lay.addLayout(conf)
+main_lay.addWidget(QLabel("IP từng máy (máy N <-> folder N trong folder xây kênh; để trống = bỏ qua):"))
+ip_scroll = make_scroll()
+main_lay.addWidget(ip_scroll)
+main_lay.addStretch(1)
 
-nb = ttk.Notebook(win); nb.pack(fill="x", padx=8, pady=2)
-tab_main = tk.Frame(nb); tab_setup = tk.Frame(nb)
-nb.add(tab_main, text="Chính"); nb.add(tab_setup, text="Setup kênh")
-
-conf = tk.Frame(tab_main); conf.pack(fill="x", pady=2)
-tk.Label(conf, text="Số máy (IP):").pack(side="left")
-tk.Spinbox(conf, from_=1, to=MAX_MACHINES, textvariable=nm_var, width=5).pack(side="left", padx=(4, 16))
-tk.Label(conf, text="Số video / folder:").pack(side="left")
-tk.Spinbox(conf, from_=1, to=MAX_PER_FOLDER, textvariable=pf_var, width=5).pack(side="left", padx=4)
-tk.Label(conf, text="(tự lưu vào config.json)", fg="#777").pack(side="left", padx=12)
-
-tk.Label(tab_main, text="IP từng máy (máy N <-> folder N trong folder xây kênh; để trống = bỏ qua):").pack(anchor="w")
-
-# --- khung IP có thanh cuộn ---
-ipwrap = tk.Frame(tab_main); ipwrap.pack(fill="x", pady=2)
-canvas = tk.Canvas(ipwrap, height=270, highlightthickness=0)
-sb = tk.Scrollbar(ipwrap, orient="vertical", command=canvas.yview)
-canvas.configure(yscrollcommand=sb.set)
-sb.pack(side="right", fill="y"); canvas.pack(side="left", fill="both", expand=True)
-grid = tk.Frame(canvas)
-gwin = canvas.create_window((0, 0), window=grid, anchor="nw")
-grid.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-canvas.bind("<Configure>", lambda e: canvas.itemconfigure(gwin, width=e.width))
-def _wheel(e):
-    canvas.yview_scroll(int(-e.delta / 120), "units")
-canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _wheel))
-canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
-
-# ===== Ô nhập kiểu Bootstrap: viền xanh + vầng sáng (box-shadow) khi focus, góc vuông =====
-BS_BORDER, BS_BLUE, BS_GLOW = "#ced4da", "#86b7fe", "#b6d4fe"
-BS_RED, BS_RED_GLOW = "#dc3545", "#f1aeb5"
-BS_GREEN, BS_GREEN_GLOW = "#198754", "#a3cfbb"
-BS_GLOW_W = 3          # độ dày vầng sáng (px)
-
-def bs_entry(parent, **kw):
-    """Trả về (khung_ngoài, entry). Đem khung ngoài đi grid/pack.
-    entry.bs_state(None | "ok" | "error") đổi màu viền (bình thường / đã lưu / sai)."""
-    G = BS_GLOW_W
-    page_bg = parent.cget("bg")
-    cv = tk.Canvas(parent, bg=page_bg, bd=0, highlightthickness=0)
-    e = tk.Entry(cv, bd=0, relief="flat", highlightthickness=0, bg="white", **kw)
-    eh = e.winfo_reqheight()
-    cv.configure(width=e.winfo_reqwidth() + 2 * (G + 1 + 6), height=eh + 2 * (G + 1 + 1))   # +1px đệm trên/dưới để ô nhập không đè lên viền
-    win_id = cv.create_window(0, 0, window=e, anchor="nw")
-    st = {"focus": False, "state": None}
-
-    def paint(w=None, h=None):
-        w = w or cv.winfo_width()
-        h = h or cv.winfo_height()
-        if w < 10:
-            w = int(cv.cget("width"))
-        if h < 10:
-            h = int(cv.cget("height"))
-        edge, glow = {None: (BS_BLUE, BS_GLOW), "ok": (BS_GREEN, BS_GREEN_GLOW),
-                      "error": (BS_RED, BS_RED_GLOW)}[st["state"]]
-        cv.delete("bs")
-        if st["focus"]:                                  # vầng sáng (box-shadow)
-            cv.create_rectangle(0, 0, w, h, fill=glow, outline="", tags="bs")
-        edge_c = edge if (st["focus"] or st["state"]) else BS_BORDER
-        cv.create_rectangle(G, G, w - G, h - G, fill=edge_c, outline="", tags="bs")        # viền: chữ nhật
-        cv.create_rectangle(G + 1, G + 1, w - G - 1, h - G - 1, fill="white", outline="", tags="bs")
-        cv.coords(win_id, G + 1 + 6, G + 1 + 1)           # toạ độ nguyên, neo góc trên-trái: không bị lệch nửa pixel
-        cv.itemconfigure(win_id, width=max(w - 2 * (G + 1 + 6), 10), height=eh)
-
-    def on_in(ev):
-        st["focus"] = True; paint()
-
-    def on_out(ev):
-        st["focus"] = False; paint()
-
-    def set_state(v):
-        st["state"] = v; paint()
-
-    cv.bind("<Configure>", lambda ev: paint(ev.width, ev.height))
-    cv.bind("<Button-1>", lambda ev: (e.focus_set(), e.icursor(tk.END)))   # bấm vào mép cũng vào ô nhập
-    e.bind("<FocusIn>", on_in, add="+")
-    e.bind("<FocusOut>", on_out, add="+")
-    e.bs_state = set_state
-    paint()
-    return cv, e
-
-def on_ip_change(i, v):
+def on_ip_change(i, text):
     if i < len(cfg["ips"]):
-        cfg["ips"][i] = v.get()
+        cfg["ips"][i] = text
     schedule_save()
 
 def build_ip_grid():
-    for w in grid.winfo_children():
-        w.destroy()
-    ip_vars.clear()
     n = cfg["num_machines"]
     cfg["ips"] += [""] * (n - len(cfg["ips"]))
+    ip_edits.clear()
+    inner = QWidget()
+    gl = QGridLayout(inner)
+    gl.setContentsMargins(4, 2, 4, 2)
+    gl.setHorizontalSpacing(6)
+    gl.setVerticalSpacing(2)
     per = max((n + 3) // 4, 1)                           # chia 4 cột: mỗi cột `per` máy
     for i in range(n):
-        v = tk.StringVar(value=cfg["ips"][i])
-        v.trace_add("write", lambda *_, i=i, v=v: on_ip_change(i, v))
-        ip_vars.append(v)
-        g = i // per
-        row = i % per
-        tk.Label(grid, text=f"Máy {i + 1}:", width=7, anchor="e").grid(row=row, column=g * 2, padx=(6, 0))
-        outer, _e = bs_entry(grid, textvariable=v, width=20)
-        outer.grid(row=row, column=g * 2 + 1, padx=(0, 8), sticky="we")
+        ed = QLineEdit(cfg["ips"][i])                    # gán giá trị trước, nối signal sau (không kích hoạt lưu)
+        ed.textChanged.connect(lambda t, i=i: on_ip_change(i, t))
+        ip_edits.append(ed)
+        g, row = divmod(i, per)
+        lb = QLabel(f"Máy {i + 1}:")
+        lb.setMinimumWidth(48)
+        lb.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        gl.addWidget(lb, row, g * 2)
+        gl.addWidget(ed, row, g * 2 + 1)
     for c in (1, 3, 5, 7):
-        grid.columnconfigure(c, weight=1)
-    grid.update_idletasks()
-    canvas.configure(height=min(max(grid.winfo_reqheight(), 30), 300))
-    canvas.yview_moveto(0)
+        gl.setColumnStretch(c, 1)
+    gl.setRowStretch(per, 1)
+    set_scroll_content(ip_scroll, inner, min_h=30)
 
 def clear_ips():
     """Xoá hết IP trong các ô nhập và trong config.json."""
-    for v in ip_vars:
-        v.set("")
+    for ed in ip_edits:
+        ed.setText("")
     cfg["ips"] = [""] * max(cfg["num_machines"], len(cfg["ips"]))
     save_config()
     log("Đã xoá hết IP")
@@ -995,97 +986,123 @@ def clear_ips():
 build_ip_grid()
 
 # --- tab Setup kênh: số folder kênh của từng máy, đọc từ Google Sheet ---
-def make_scroll_grid(parent):
-    wrap = tk.Frame(parent); wrap.pack(fill="x", pady=2)
-    cv = tk.Canvas(wrap, height=270, highlightthickness=0)
-    vsb = tk.Scrollbar(wrap, orient="vertical", command=cv.yview)
-    cv.configure(yscrollcommand=vsb.set)
-    vsb.pack(side="right", fill="y"); cv.pack(side="left", fill="both", expand=True)
-    g = tk.Frame(cv)
-    gw = cv.create_window((0, 0), window=g, anchor="nw")
-    g.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-    cv.bind("<Configure>", lambda e: cv.itemconfigure(gw, width=e.width))
-    cv.bind("<Enter>", lambda e: cv.bind_all("<MouseWheel>", lambda ev: cv.yview_scroll(int(-ev.delta / 120), "units")))
-    cv.bind("<Leave>", lambda e: cv.unbind_all("<MouseWheel>"))
-    return cv, g
+setup_lay = QVBoxLayout(tab_setup)
+setup_lay.setContentsMargins(4, 6, 4, 4)
+
+sheet_edit = QLineEdit(cfg["sheet_url"])
+colm_edit = QLineEdit(cfg["sheet_col_machine"])
+colv_edit = QLineEdit(cfg["sheet_col_view"])
+sheet_info = QLabel("")
+
+def on_sheet_change(text):
+    cfg["sheet_url"] = text.strip()
+    schedule_save()
+
+def on_col_change(*_):
+    cfg["sheet_col_machine"] = colm_edit.text().strip().upper()
+    cfg["sheet_col_view"] = colv_edit.text().strip().upper()
+    schedule_save()
+
+def read_sheet_clicked():
+    cfg["sheet_url"] = sheet_edit.text().strip()
+    on_col_change()
+    threading.Thread(target=refresh_sheet, daemon=True).start()
+
+sheet_edit.textChanged.connect(on_sheet_change)
+colm_edit.textChanged.connect(on_col_change)
+colv_edit.textChanged.connect(on_col_change)
+
+def colored_button(text, bg, cb, min_w=110):
+    b = QPushButton(text)
+    b.setMinimumWidth(min_w)
+    b.setCursor(Qt.CursorShape.PointingHandCursor)
+    b.setStyleSheet(f"QPushButton {{ background:{bg}; color:white; border:none; padding:6px 10px; }}"
+                    f"QPushButton:hover {{ background:{QColor(bg).darker(112).name()}; }}")
+    b.clicked.connect(lambda: cb())
+    return b
+
+shf = QHBoxLayout()
+shf.addWidget(QLabel("Link Google Sheet:")); shf.addWidget(sheet_edit, 1)
+shf.addWidget(colored_button("Đọc sheet", "#2196f3", read_sheet_clicked, 100))
+setup_lay.addLayout(shf)
+
+colf = QHBoxLayout()
+for ed in (colm_edit, colv_edit):
+    ed.setFixedWidth(55)
+    ed.setAlignment(Qt.AlignmentFlag.AlignCenter)
+hint_lb = QLabel("(nhập chữ cái cột, vd I, K)"); hint_lb.setStyleSheet(GRAY)
+colf.addWidget(QLabel("Cột số máy:")); colf.addWidget(colm_edit); colf.addSpacing(16)
+colf.addWidget(QLabel("Cột view:")); colf.addWidget(colv_edit); colf.addSpacing(16)
+colf.addWidget(hint_lb); colf.addStretch(1)
+setup_lay.addLayout(colf)
+
+desc_lb = QLabel("Ô cột view RỖNG -> +1 folder cho máy ở cột số máy. Máy không có dòng nào = 0 folder. "
+                 "DỌN: thiếu -> bù từ folder đã cut xong, thừa -> chuyển về folder đã cut xong.")
+desc_lb.setStyleSheet(GRAY)
+desc_lb.setWordWrap(True)
+setup_lay.addWidget(desc_lb)
+setup_lay.addWidget(sheet_info)
+fc_scroll = make_scroll()
+setup_lay.addWidget(fc_scroll)
+setup_lay.addStretch(1)
 
 def build_sheet_table():
-    for w in fc_grid.winfo_children():
-        w.destroy()
     items = sorted(cfg["sheet_counts"].items(), key=lambda kv: int(kv[0]))
+    inner = QWidget()
+    gl = QGridLayout(inner)
+    gl.setContentsMargins(4, 2, 4, 2)
+    gl.setVerticalSpacing(2)
     if not items:
-        sheet_info.set("Chưa đọc sheet")
-        tk.Label(fc_grid, text="(chưa có dữ liệu, nhập link rồi bấm Đọc sheet)", fg="#777").grid(row=0, column=0, padx=6, pady=4, sticky="w")
+        sheet_info.setText("Chưa đọc sheet")
+        lb = QLabel("(chưa có dữ liệu, nhập link rồi bấm Đọc sheet)")
+        lb.setStyleSheet(GRAY)
+        gl.addWidget(lb, 0, 0)
+        gl.setColumnStretch(1, 1)
     else:
-        sheet_info.set(f"{len(items)} máy, tổng {sum(c for _, c in items)} folder (DỌN sẽ tự đọc lại sheet)")
-        per = max((len(items) + 3) // 4, 1)             # chia 4 cột: mỗi cột `per` máy
+        sheet_info.setText(f"{len(items)} máy, tổng {sum(c for _, c in items)} folder (DỌN sẽ tự đọc lại sheet)")
+        per = max((len(items) + 3) // 4, 1)              # chia 4 cột: mỗi cột `per` máy
         groups = (len(items) + per - 1) // per
         for g in range(groups):
             base = g * 3
-            tk.Label(fc_grid, text="Máy", width=7, font=("", 9, "bold")).grid(row=0, column=base, pady=1)
-            tk.Label(fc_grid, text="Số folder", width=9, font=("", 9, "bold")).grid(row=0, column=base + 1, pady=1)
+            h1 = QLabel("Máy"); h1.setStyleSheet(BOLD)
+            h2 = QLabel("Số folder"); h2.setStyleSheet(BOLD); h2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            gl.addWidget(h1, 0, base)
+            gl.addWidget(h2, 0, base + 1)
+            gl.setColumnStretch(base + 2, 1)
         for i, (k, c) in enumerate(items):
             m = int(k)
             base = (i // per) * 3
             r = i % per + 1
             note = "" if m <= cfg["num_machines"] else " (ngoài số máy)"
-            tk.Label(fc_grid, text=f"Máy {m}{note}", width=7 if not note else 20, anchor="w").grid(row=r, column=base, padx=(6, 2), pady=1, sticky="w")
-            tk.Label(fc_grid, text=str(c), width=9, anchor="center").grid(row=r, column=base + 1, padx=(0, 12), pady=1)
-    fc_grid.update_idletasks()
-    fc_canvas.configure(height=min(max(fc_grid.winfo_reqheight(), 40), 300))
-    fc_canvas.yview_moveto(0)
+            lb = QLabel(f"Máy {m}{note}")
+            lb.setMinimumWidth(60)
+            cl = QLabel(str(c)); cl.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.setMinimumWidth(70)
+            gl.addWidget(lb, r, base)
+            gl.addWidget(cl, r, base + 1)
+        gl.setRowStretch(per + 1, 1)
+    set_scroll_content(fc_scroll, inner)
 
-sheet_var = tk.StringVar(value=cfg["sheet_url"])
-sheet_info = tk.StringVar(value="")
-def on_sheet_change(*_):
-    cfg["sheet_url"] = sheet_var.get().strip()
-    schedule_save()
-sheet_var.trace_add("write", on_sheet_change)
-
-colm_var = tk.StringVar(value=cfg["sheet_col_machine"])
-colv_var = tk.StringVar(value=cfg["sheet_col_view"])
-def on_col_change(*_):
-    cfg["sheet_col_machine"] = colm_var.get().strip().upper()
-    cfg["sheet_col_view"] = colv_var.get().strip().upper()
-    schedule_save()
-colm_var.trace_add("write", on_col_change)
-colv_var.trace_add("write", on_col_change)
-
-def read_sheet_clicked():
-    cfg["sheet_url"] = sheet_var.get().strip()
-    on_col_change()
-    threading.Thread(target=refresh_sheet, daemon=True).start()
-
-shf = tk.Frame(tab_setup); shf.pack(fill="x", pady=(6, 2))
-tk.Label(shf, text="Link Google Sheet:", anchor="w").pack(side="left")
-tk.Entry(shf, textvariable=sheet_var).pack(side="left", fill="x", expand=True, padx=4)
-tk.Button(shf, text="Đọc sheet", width=12, bg="#2196f3", fg="white", activebackground="#1976d2", activeforeground="white", command=read_sheet_clicked).pack(side="left", padx=4)
-colf = tk.Frame(tab_setup); colf.pack(fill="x", pady=(2, 2))
-tk.Label(colf, text="Cột số máy:").pack(side="left")
-tk.Entry(colf, textvariable=colm_var, width=5, justify="center").pack(side="left", padx=(4, 16))
-tk.Label(colf, text="Cột view:").pack(side="left")
-tk.Entry(colf, textvariable=colv_var, width=5, justify="center").pack(side="left", padx=(4, 16))
-tk.Label(colf, text="(nhập chữ cái cột, vd I, K)", fg="#777").pack(side="left")
-tk.Label(tab_setup, text="Ô cột view RỖNG -> +1 folder cho máy ở cột số máy. Máy không có dòng nào = 0 folder. DỌN: thiếu -> bù từ folder đã cut xong, thừa -> chuyển về folder đã cut xong.",
-         fg="#777", wraplength=840, justify="left").pack(anchor="w", pady=(2, 2))
-tk.Label(tab_setup, textvariable=sheet_info, anchor="w").pack(anchor="w", pady=(2, 2))
-fc_canvas, fc_grid = make_scroll_grid(tab_setup)
 build_sheet_table()
 
-btns = tk.Frame(win); btns.pack(pady=6)
-tk.Button(btns, text="DỌN", width=14, bg="#ff9800", fg="white", command=lambda: confirm_run(do_clean, "DỌN")).pack(side="left", padx=4)
-tk.Button(btns, text="CHUYỂN", width=14, bg="#4caf50", fg="white", command=lambda: confirm_run(do_send, "CHUYỂN")).pack(side="left", padx=4)
-tk.Button(btns, text="RETRY", width=14, bg="#f44336", fg="white", command=lambda: run(do_retry)).pack(side="left", padx=4)
-tk.Button(btns, text="CLEAR IP", width=14, bg="#607d8b", fg="white", command=clear_ips).pack(side="left", padx=4)
+# --- nút chạy ---
+btns = QHBoxLayout()
+btns.addStretch(1)
+for text, bg, cb in (("DỌN", "#ff9800", lambda: confirm_run(do_clean, "DỌN")),
+                     ("CHUYỂN", "#4caf50", lambda: confirm_run(do_send, "CHUYỂN")),
+                     ("RETRY", "#f44336", lambda: run(do_retry)),
+                     ("CLEAR IP", "#607d8b", clear_ips)):
+    btns.addWidget(colored_button(text, bg, cb, 110))
+btns.addStretch(1)
+lay.addLayout(btns)
 
-txt = scrolledtext.ScrolledText(win); txt.pack(fill="both", expand=True, padx=8, pady=6)
+# --- ô log ---
+txt = QPlainTextEdit()
+txt.setReadOnly(True)
+lay.addWidget(txt, 1)
 
-def on_close():
-    apply_counts()
-    save_config()
-    save_state()
-    win.destroy()
+pump_timer = QTimer(win)
+pump_timer.timeout.connect(pump_log)
+pump_timer.start(200)
 
-win.protocol("WM_DELETE_WINDOW", on_close)
-pump_log()
-win.mainloop()
+win.show()
+sys.exit(app.exec())
