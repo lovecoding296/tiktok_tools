@@ -241,20 +241,19 @@ def is_english(title: str) -> bool:
     other = sum(1 for w in words if w in OTHER_WORDS and w not in EN_WORDS)
     return other <= en
 
-def tokenize(text: str, strip_hashtags: bool) -> list[str]:
+def tokenize(text: str) -> list[str]:
     text = unicodedata.normalize("NFC", text).lower()
-    if strip_hashtags:
-        text = re.sub(r"[#@]\S+", " ", text)
+    text = re.sub(r"[#@]\S+", " ", text)   # luôn bỏ #hashtag / @mention
     return re.findall(r"\w+", text, re.UNICODE)
 
-def is_match(query: str, caption: str, max_extra: int, strip_hashtags: bool) -> bool:
-    """Caption chứa nguyên tiêu đề (liền mạch) và thừa tối đa max_extra từ => khớp."""
-    q = tokenize(query, strip_hashtags)
-    c = tokenize(caption, strip_hashtags)
-    if not q or len(c) < len(q) or len(c) - len(q) > max_extra:
+def is_match(query: str, caption: str) -> bool:
+    """Caption BẮT ĐẦU bằng nguyên tiêu đề (liền mạch) => khớp.
+    Phần phía sau (Video by..., hashtag...) thừa bao nhiêu từ cũng được."""
+    q = tokenize(query)
+    c = tokenize(caption)
+    if not q or len(c) < len(q):
         return False
-    n = len(q)
-    return any(c[i:i + n] == q for i in range(len(c) - n + 1))
+    return c[:len(q)] == q
 
 def collect_desc(obj, out: list):
     if isinstance(obj, dict):
@@ -413,7 +412,6 @@ class App(QMainWindow):
         self.stop_event = threading.Event()
         self.yt_stop_event = threading.Event()
         self.delay = 2.0
-        self.max_extra = 2
         self.top_n = 5
         self.busy = False
         self.meta_running = False
@@ -437,9 +435,7 @@ class App(QMainWindow):
         self._refresh_job = None
 
         self.delay_var = ValueVar("2")
-        self.extra_var = ValueVar("2")
         self.topn_var = ValueVar("5")
-        self.strip_tag_var = ValueVar(True)
         self.yt_kw_var = ValueVar("")
         self.yt_views_var = ValueVar("100000")
         self.yt_max_var = ValueVar("200")
@@ -519,11 +515,6 @@ class App(QMainWindow):
         top_l.addWidget(QLabel("Check top:"))
         self.ed_topn = QLineEdit("5"); self.ed_topn.setFixedWidth(58); top_l.addWidget(self.ed_topn)
         self.ed_topn.textChanged.connect(lambda v: (self.topn_var.set(v), self._sync_opts()))
-        top_l.addWidget(QLabel("Max extra words:"))
-        self.ed_extra = QLineEdit("2"); self.ed_extra.setFixedWidth(58); top_l.addWidget(self.ed_extra)
-        self.ed_extra.textChanged.connect(lambda v: (self.extra_var.set(v), self._sync_opts()))
-        self.chk_strip = QCheckBox("Ignore #hashtag/@mention"); self.chk_strip.setChecked(True)
-        self.chk_strip.toggled.connect(self.strip_tag_var.set); top_l.addWidget(self.chk_strip)
         top_l.addStretch(1)
         self.btn_open_chrome = self._button("Open Chrome", self.open_chrome, "#D97706")
         top_l.addWidget(self.btn_open_chrome)
@@ -766,10 +757,6 @@ class App(QMainWindow):
     def _sync_opts(self):
         try:
             self.delay = max(0.0, float(self.delay_var.get().replace(",", ".")))
-        except ValueError:
-            pass
-        try:
-            self.max_extra = max(0, int(self.extra_var.get()))
         except ValueError:
             pass
         try:
@@ -1560,7 +1547,7 @@ class App(QMainWindow):
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         threading.Thread(target=self.run_worker,
-                         args=(lines, self.strip_tag_var.get(), default_src),
+                         args=(lines, default_src),
                          daemon=True).start()
 
     def stop(self):
@@ -1595,7 +1582,7 @@ class App(QMainWindow):
             self.save_src(src)
             self.schedule_refresh()
 
-    def run_worker(self, lines, strip_tag, default_src):
+    def run_worker(self, lines, default_src):
         page = None
         nf_count = err_count = 0
         try:
@@ -1632,7 +1619,7 @@ class App(QMainWindow):
                         self.log(f"[{i}/{total}] ⚠ {why} -> error.txt: {title}")
                         result = "error"
                         err_count += 1
-                    elif any(is_match(title, c, self.max_extra, strip_tag) for c in captions):
+                    elif any(is_match(title, c) for c in captions):
                         self.log(f"[{i}/{total}] ✓ Found: {title}")
                         result = "found"
                     else:
